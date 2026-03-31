@@ -1,0 +1,401 @@
+import {
+  AccountRole,
+  address,
+  appendTransactionMessageInstructions,
+  createTransactionMessage,
+  getAddressEncoder,
+  getProgramDerivedAddress,
+  getTransactionEncoder,
+  pipe,
+  setTransactionMessageFeePayerSigner,
+  setTransactionMessageLifetimeUsingBlockhash,
+  type Address,
+  type Blockhash,
+  type KeyPairSigner,
+  type Transaction,
+} from "@solana/kit";
+
+import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+  DEFAULT_DISCORD_PUBLIC_KEY,
+  ED25519_PROGRAM_ID,
+  EXECUTE_DISCRIMINATOR,
+  EXECUTE_HEADER_LEN,
+  INSTRUCTIONS_SYSVAR_ID,
+  MAX_TRANSACTION_SIZE,
+  SYSTEM_PROGRAM_ID,
+  SYSTEM_TRANSFER_DISCRIMINATOR,
+  TOKEN_PROGRAM_ID,
+  TOKEN_TRANSFER_DISCRIMINATOR,
+  VAULT_SEED,
+  WALLET_SEED,
+} from "./constants";
+import type { DiscordInteraction } from "./discord";
+
+const ADDRESS_ENCODER = getAddressEncoder();
+
+export async function walletStatePda(
+  programId: Address,
+  discordUserId: string,
+): Promise<Address> {
+  return (
+    await getProgramDerivedAddress({
+      programAddress: programId,
+      seeds: [WALLET_SEED, u64Le(discordUserId)],
+    })
+  )[0];
+}
+
+export async function vaultPda(
+  programId: Address,
+  walletState: Address,
+): Promise<Address> {
+  return (
+    await getProgramDerivedAddress({
+      programAddress: programId,
+      seeds: [VAULT_SEED, ADDRESS_ENCODER.encode(walletState)],
+    })
+  )[0];
+}
+
+export async function associatedTokenAddress(
+  owner: Address,
+  mint: Address,
+): Promise<Address> {
+  return (
+    await getProgramDerivedAddress({
+      programAddress: ASSOCIATED_TOKEN_PROGRAM_ID,
+      seeds: [
+        ADDRESS_ENCODER.encode(owner),
+        ADDRESS_ENCODER.encode(TOKEN_PROGRAM_ID),
+        ADDRESS_ENCODER.encode(mint),
+      ],
+    })
+  )[0];
+}
+
+export function encodeInteractionInstruction(
+  discriminator: number,
+  timestamp: string,
+  rawBody: string,
+): Uint8Array {
+  const timestampBytes = Buffer.from(timestamp, "utf8");
+  const rawBodyBytes = Buffer.from(rawBody, "utf8");
+  const verifiedMessageLen = timestampBytes.length + rawBodyBytes.length;
+
+  const data = new Uint8Array(EXECUTE_HEADER_LEN + verifiedMessageLen);
+  data[0] = discriminator;
+  writeU16Le(data, 1, timestampBytes.length);
+  writeU16Le(data, 3, rawBodyBytes.length);
+  data.set(timestampBytes, EXECUTE_HEADER_LEN);
+  data.set(rawBodyBytes, EXECUTE_HEADER_LEN + timestampBytes.length);
+  return data;
+}
+
+export async function buildDiscordCommandTransaction(params: {
+  interaction: Extract<DiscordInteraction, { type: 2 }>;
+  rawBody: string;
+  timestamp: string;
+  signatureHex: string;
+  programId: Address;
+  relayer: KeyPairSigner;
+  latestBlockhash: Readonly<{
+    blockhash: Blockhash;
+    lastValidBlockHeight: bigint;
+  }>;
+  discordPublicKey?: Address;
+}) {
+  const {
+    interaction,
+    rawBody,
+    timestamp,
+    signatureHex,
+    programId,
+    relayer,
+    latestBlockhash,
+    discordPublicKey = DEFAULT_DISCORD_PUBLIC_KEY,
+  } = params;
+
+  if (!interaction.guild_id) {
+    throw new Error("guild interactions are required");
+  }
+
+  const sourceWalletState = await walletStatePda(programId, interaction.member.user.id);
+  const sourceVault = await vaultPda(programId, sourceWalletState);
+  const { discriminator, accounts } = await buildInstructionAccounts({
+    interaction,
+    programId,
+    relayer,
+    sourceWalletState,
+    sourceVault,
+  });
+  const instructionData = encodeInteractionInstruction(discriminator, timestamp, rawBody);
+  const commandIx = {
+    programAddress: programId,
+    accounts,
+    data: instructionData,
+  };
+  const ed25519Ix = buildEd25519VerifyInstruction({
+    signatureHex,
+    publicKey: discordPublicKey,
+    messageInstructionIndex: 1,
+    messageDataOffset: EXECUTE_HEADER_LEN,
+    messageDataSize: instructionData.length - EXECUTE_HEADER_LEN,
+  });
+
+  const transactionMessage = pipe(
+    createV1TransactionMessage(),
+    (message) => setTransactionMessageFeePayerSigner(relayer, message),
+    (message) =>
+      setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, message),
+    (message) =>
+      appendTransactionMessageInstructions([ed25519Ix, commandIx], message),
+  );
+
+  return { transactionMessage, walletState: sourceWalletState, vault: sourceVault };
+}
+
+async function buildInstructionAccounts(params: {
+  interaction: Extract<DiscordInteraction, { type: 2 }>;
+  programId: Address;
+  relayer: KeyPairSigner;
+  sourceWalletState: Address;
+  sourceVault: Address;
+}) {
+  const { interaction, programId, relayer, sourceWalletState, sourceVault } = params;
+  switch (interaction.data.name) {
+    case "wallet_init":
+      return {
+        discriminator: EXECUTE_DISCRIMINATOR,
+        accounts: [
+          signerMeta(relayer),
+          writableMeta(sourceWalletState),
+          writableMeta(sourceVault),
+          readonlyMeta(INSTRUCTIONS_SYSVAR_ID),
+          readonlyMeta(SYSTEM_PROGRAM_ID),
+        ],
+      };
+    case "set_withdrawer":
+      return {
+        discriminator: EXECUTE_DISCRIMINATOR,
+        accounts: [
+          signerMeta(relayer),
+          writableMeta(sourceWalletState),
+          readonlyMeta(INSTRUCTIONS_SYSVAR_ID),
+        ],
+      };
+    case "transfer":
+      return buildTransferInstructionAccounts({
+        interaction,
+        relayer,
+        programId,
+        sourceWalletState,
+        sourceVault,
+      });
+    default:
+      throw new Error(`unsupported command ${interaction.data.name}`);
+  }
+}
+
+async function buildTransferInstructionAccounts(params: {
+  interaction: Extract<DiscordInteraction, { type: 2 }>;
+  relayer: KeyPairSigner;
+  programId: Address;
+  sourceWalletState: Address;
+  sourceVault: Address;
+}) {
+  const { interaction, relayer, programId, sourceWalletState, sourceVault } = params;
+  const tokenSpecifier = optionStringValue(interaction, "tkn");
+  const destination = optionStringValue(interaction, "to");
+
+  if (tokenSpecifier.toLowerCase() === "sol") {
+    const discordMentionId = parseDiscordMention(destination);
+    if (discordMentionId) {
+      const destinationWalletState = await walletStatePda(programId, discordMentionId);
+      const destinationVault = await vaultPda(programId, destinationWalletState);
+      return {
+        discriminator: SYSTEM_TRANSFER_DISCRIMINATOR,
+        accounts: [
+          signerMeta(relayer),
+          writableMeta(sourceWalletState),
+          writableMeta(sourceVault),
+          readonlyMeta(destinationWalletState),
+          writableMeta(destinationVault),
+          readonlyMeta(INSTRUCTIONS_SYSVAR_ID),
+          readonlyMeta(SYSTEM_PROGRAM_ID),
+        ],
+      };
+    }
+
+    return {
+      discriminator: SYSTEM_TRANSFER_DISCRIMINATOR,
+      accounts: [
+        signerMeta(relayer),
+        writableMeta(sourceWalletState),
+        writableMeta(sourceVault),
+        writableMeta(parseAddress(destination, "transfer destination address invalid")),
+        readonlyMeta(INSTRUCTIONS_SYSVAR_ID),
+        readonlyMeta(SYSTEM_PROGRAM_ID),
+      ],
+    };
+  }
+
+  const mint = parseAddress(tokenSpecifier, "unsupported token symbol");
+  const sourceTokenAccount = await associatedTokenAddress(sourceVault, mint);
+  const discordMentionId = parseDiscordMention(destination);
+  if (discordMentionId) {
+    const destinationWalletState = await walletStatePda(programId, discordMentionId);
+    const destinationVault = await vaultPda(programId, destinationWalletState);
+    const destinationTokenAccount = await associatedTokenAddress(destinationVault, mint);
+    return {
+      discriminator: TOKEN_TRANSFER_DISCRIMINATOR,
+      accounts: [
+        signerMeta(relayer),
+        writableMeta(sourceWalletState),
+        readonlyMeta(sourceVault),
+        readonlyMeta(mint),
+        writableMeta(sourceTokenAccount),
+        readonlyMeta(destinationWalletState),
+        writableMeta(destinationTokenAccount),
+        readonlyMeta(INSTRUCTIONS_SYSVAR_ID),
+        readonlyMeta(TOKEN_PROGRAM_ID),
+      ],
+    };
+  }
+
+  const destinationOwner = parseAddress(
+    destination,
+    "transfer destination address invalid",
+  );
+  const destinationTokenAccount = await associatedTokenAddress(destinationOwner, mint);
+  return {
+    discriminator: TOKEN_TRANSFER_DISCRIMINATOR,
+    accounts: [
+      signerMeta(relayer),
+      writableMeta(sourceWalletState),
+      readonlyMeta(sourceVault),
+      readonlyMeta(mint),
+      writableMeta(sourceTokenAccount),
+      writableMeta(destinationTokenAccount),
+      readonlyMeta(INSTRUCTIONS_SYSVAR_ID),
+      readonlyMeta(TOKEN_PROGRAM_ID),
+    ],
+  };
+}
+
+function signerMeta(signer: KeyPairSigner) {
+  return {
+    address: signer.address,
+    role: AccountRole.WRITABLE_SIGNER,
+    signer,
+  };
+}
+
+function writableMeta(address: Address) {
+  return { address, role: AccountRole.WRITABLE };
+}
+
+function readonlyMeta(address: Address) {
+  return { address, role: AccountRole.READONLY };
+}
+
+function parseAddress(value: string, errorMessage: string): Address {
+  try {
+    return address(value);
+  } catch {
+    throw new Error(errorMessage);
+  }
+}
+
+function parseDiscordMention(value: string): string | null {
+  const match = /^<@!?(\d+)>$/.exec(value);
+  return match ? match[1] : null;
+}
+
+function createV1TransactionMessage() {
+  // Kit compiles v1 transactions at runtime, but its public constructor type still excludes `1`.
+  // @ts-expect-error v1 creation is supported at runtime but not yet exposed in the TS signature.
+  return createTransactionMessage({ version: 1 });
+}
+
+export function assertTransactionSize(transaction: Transaction): number {
+  const length = getTransactionEncoder().encode(transaction).length;
+  if (length > MAX_TRANSACTION_SIZE) {
+    throw new Error(
+      `transaction size ${length} exceeds ${MAX_TRANSACTION_SIZE}`,
+    );
+  }
+  return length;
+}
+
+function buildEd25519VerifyInstruction(params: {
+  signatureHex: string;
+  publicKey: Address;
+  messageInstructionIndex: number;
+  messageDataOffset: number;
+  messageDataSize: number;
+}) {
+  const signature = Buffer.from(params.signatureHex, "hex");
+  if (signature.length !== 64) {
+    throw new Error("discord signature must be 64 bytes");
+  }
+
+  const header = Buffer.alloc(16);
+  const signatureOffset = 16;
+  const publicKeyOffset = signatureOffset + 64;
+
+  header[0] = 1;
+  header[1] = 0;
+  header.writeUInt16LE(signatureOffset, 2);
+  header.writeUInt16LE(0xffff, 4);
+  header.writeUInt16LE(publicKeyOffset, 6);
+  header.writeUInt16LE(0xffff, 8);
+  header.writeUInt16LE(params.messageDataOffset, 10);
+  header.writeUInt16LE(params.messageDataSize, 12);
+  header.writeUInt16LE(params.messageInstructionIndex, 14);
+  const publicKeyBytes = ADDRESS_ENCODER.encode(params.publicKey);
+  const data = new Uint8Array(
+    header.length + signature.length + publicKeyBytes.length,
+  );
+  data.set(new Uint8Array(header), 0);
+  data.set(new Uint8Array(signature), header.length);
+  data.set(publicKeyBytes, header.length + signature.length);
+
+  return {
+    programAddress: ED25519_PROGRAM_ID,
+    accounts: [],
+    data,
+  };
+}
+
+function u64Le(value: string): Uint8Array {
+  const encoded = new Uint8Array(8);
+  new DataView(
+    encoded.buffer,
+    encoded.byteOffset,
+    encoded.byteLength,
+  ).setBigUint64(0, BigInt(value), true);
+  return encoded;
+}
+
+export function optionStringValue(
+  interaction: Extract<DiscordInteraction, { type: 2 }>,
+  name: string,
+): string {
+  const value = interaction.data.options?.find((option) => option.name === name)?.value;
+  if (typeof value === "number") {
+    return `${value}`;
+  }
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`option ${name} must be a string or number`);
+  }
+  return value;
+}
+
+function writeU16Le(bytes: Uint8Array, offset: number, value: number) {
+  new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setUint16(
+    offset,
+    value,
+    true,
+  );
+}

@@ -1,0 +1,4 @@
+[workspace]
+members = ["programs/discord-wallet"]
+resolver = "2"
+
