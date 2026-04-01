@@ -1,13 +1,11 @@
+mod sigverify;
+
 use core::str::FromStr;
 
 use pinocchio::{
     cpi::{Seed, Signer},
     error::ProgramError,
-    sysvars::{
-        clock::Clock,
-        instructions::{Instructions, INSTRUCTIONS_ID},
-        Sysvar,
-    },
+    sysvars::{clock::Clock, instructions::INSTRUCTIONS_ID, Sysvar},
     AccountView, Address, ProgramResult,
 };
 use pinocchio_system::instructions::{CreateAccount, Transfer};
@@ -16,7 +14,6 @@ use pinocchio_token::{
     state::{Mint, TokenAccount},
 };
 use solana_program_log::log;
-use solana_sdk_ids::ed25519_program;
 
 #[cfg(feature = "bpf-entrypoint")]
 mod entrypoint {
@@ -55,6 +52,9 @@ const DISCORD_PUBLIC_KEY: Address = Address::from_str_const(DISCORD_PUBLIC_KEY_S
 const TOKEN_PROGRAM_ID: Address = pinocchio_token::ID;
 const ASSOCIATED_TOKEN_PROGRAM_ID: Address =
     Address::from_str_const("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+const USDC_MINT: Address = Address::from_str_const("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+const USDT_MINT: Address = Address::from_str_const("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB");
+const JUP_MINT: Address = Address::from_str_const("JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN");
 
 const SEED_WALLET: &[u8] = b"wallet";
 const SEED_VAULT: &[u8] = b"vault";
@@ -261,10 +261,12 @@ fn process_execute_instruction(
     let verified_timestamp = reject_stale_timestamp(payload.timestamp)?;
 
     let parsed_accounts = ExecuteAccounts::try_from((program_id, accounts, &interaction))?;
-    verify_ed25519(
+    sigverify::verify_ed25519(
         parsed_accounts.instructions_sysvar(),
         instruction_data,
-        &payload,
+        &DISCORD_PUBLIC_KEY,
+        EXECUTE_HEADER_LEN,
+        payload.verified_message_len,
     )?;
 
     match (parsed_accounts, command) {
@@ -294,10 +296,12 @@ fn process_system_transfer_instruction(
     let command = interaction.command.clone();
     let verified_timestamp = reject_stale_timestamp(payload.timestamp)?;
     let parsed_accounts = SystemTransferAccounts::try_from((program_id, accounts, &interaction))?;
-    verify_ed25519(
+    sigverify::verify_ed25519(
         parsed_accounts.instructions_sysvar(),
         instruction_data,
-        &payload,
+        &DISCORD_PUBLIC_KEY,
+        EXECUTE_HEADER_LEN,
+        payload.verified_message_len,
     )?;
 
     match (parsed_accounts, command) {
@@ -343,10 +347,12 @@ fn process_token_transfer_instruction(
     let command = interaction.command.clone();
     let verified_timestamp = reject_stale_timestamp(payload.timestamp)?;
     let parsed_accounts = TokenTransferAccounts::try_from((program_id, accounts, &interaction))?;
-    verify_ed25519(
+    sigverify::verify_ed25519(
         parsed_accounts.instructions_sysvar(),
         instruction_data,
-        &payload,
+        &DISCORD_PUBLIC_KEY,
+        EXECUTE_HEADER_LEN,
+        payload.verified_message_len,
     )?;
 
     match (parsed_accounts, command) {
@@ -506,12 +512,6 @@ impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a ParsedInteraction<'a>)>
                 if !wallet_state.is_writable() || !vault.is_writable() {
                     return Err(ProgramError::InvalidAccountData);
                 }
-                if wallet_state.address() == vault.address()
-                    || wallet_state.address() == payer.address()
-                    || vault.address() == payer.address()
-                {
-                    return Err(ProgramError::InvalidArgument);
-                }
 
                 let (expected_wallet, _) = wallet_pda(interaction.user_id, program_id);
                 let (expected_vault, _) = vault_pda(wallet_state.address(), program_id);
@@ -535,9 +535,6 @@ impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a ParsedInteraction<'a>)>
                 validate_execute_common_accounts(payer, instructions_sysvar)?;
                 if !wallet_state.is_writable() {
                     return Err(ProgramError::InvalidAccountData);
-                }
-                if wallet_state.address() == payer.address() {
-                    return Err(ProgramError::InvalidArgument);
                 }
 
                 let (expected_wallet, _) = wallet_pda(interaction.user_id, program_id);
@@ -612,15 +609,6 @@ impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a ParsedInteraction<'a>)>
                     || !destination_vault.is_writable()
                 {
                     return Err(ProgramError::InvalidAccountData);
-                }
-                if source_wallet_state.address() == source_vault.address()
-                    || source_wallet_state.address() == destination_wallet_state.address()
-                    || source_wallet_state.address() == destination_vault.address()
-                    || source_vault.address() == destination_wallet_state.address()
-                    || source_vault.address() == destination_vault.address()
-                    || destination_wallet_state.address() == destination_vault.address()
-                {
-                    return Err(ProgramError::InvalidArgument);
                 }
 
                 let (expected_destination_wallet, _) = wallet_pda(destination_user_id, program_id);
@@ -707,14 +695,6 @@ impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a ParsedInteraction<'a>)>
                     source_token_account,
                     destination_token_account,
                 )?;
-                if source_wallet_state.address() == destination_wallet_state.address()
-                    || source_vault.address() == destination_wallet_state.address()
-                    || mint.address() == destination_wallet_state.address()
-                    || source_token_account.address() == destination_wallet_state.address()
-                    || destination_wallet_state.address() == destination_token_account.address()
-                {
-                    return Err(ProgramError::InvalidArgument);
-                }
 
                 let (expected_destination_wallet, _) = wallet_pda(destination_user_id, program_id);
                 if destination_wallet_state.address() != &expected_destination_wallet {
@@ -761,14 +741,6 @@ impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a WithdrawPayload)> for With
                 if system_program.address() != &pinocchio_system::ID {
                     return Err(ProgramError::IncorrectProgramId);
                 }
-                if wallet_state.address() == vault.address()
-                    || wallet_state.address() == destination.address()
-                    || vault.address() == destination.address()
-                    || withdrawer.address() == wallet_state.address()
-                    || withdrawer.address() == vault.address()
-                {
-                    return Err(ProgramError::InvalidArgument);
-                }
 
                 Ok(Self::Sol(WithdrawSolAccounts {
                     withdrawer,
@@ -792,20 +764,6 @@ impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a WithdrawPayload)> for With
                 }
                 if token_program.address() != &TOKEN_PROGRAM_ID {
                     return Err(ProgramError::IncorrectProgramId);
-                }
-                if wallet_state.address() == vault.address()
-                    || wallet_state.address() == mint.address()
-                    || wallet_state.address() == source_token_account.address()
-                    || wallet_state.address() == destination_token_account.address()
-                    || vault.address() == mint.address()
-                    || vault.address() == source_token_account.address()
-                    || vault.address() == destination_token_account.address()
-                    || mint.address() == source_token_account.address()
-                    || mint.address() == destination_token_account.address()
-                    || source_token_account.address() == destination_token_account.address()
-                    || withdrawer.address() == wallet_state.address()
-                {
-                    return Err(ProgramError::InvalidArgument);
                 }
 
                 Ok(Self::Token(WithdrawTokenAccounts {
@@ -845,12 +803,6 @@ fn validate_sol_transfer_accounts(
     {
         return Err(ProgramError::InvalidAccountData);
     }
-    if source_wallet_state.address() == source_vault.address()
-        || source_wallet_state.address() == destination.address()
-        || source_vault.address() == destination.address()
-    {
-        return Err(ProgramError::InvalidArgument);
-    }
     Ok(())
 }
 
@@ -859,8 +811,8 @@ fn validate_token_transfer_accounts(
     instructions_sysvar: &AccountView,
     token_program: &AccountView,
     source_wallet_state: &AccountView,
-    source_vault: &AccountView,
-    mint: &AccountView,
+    _source_vault: &AccountView,
+    _mint: &AccountView,
     source_token_account: &AccountView,
     destination_token_account: &AccountView,
 ) -> ProgramResult {
@@ -873,19 +825,6 @@ fn validate_token_transfer_accounts(
         || !destination_token_account.is_writable()
     {
         return Err(ProgramError::InvalidAccountData);
-    }
-    if source_wallet_state.address() == source_vault.address()
-        || source_wallet_state.address() == mint.address()
-        || source_wallet_state.address() == source_token_account.address()
-        || source_wallet_state.address() == destination_token_account.address()
-        || source_vault.address() == mint.address()
-        || source_vault.address() == source_token_account.address()
-        || source_vault.address() == destination_token_account.address()
-        || mint.address() == source_token_account.address()
-        || mint.address() == destination_token_account.address()
-        || source_token_account.address() == destination_token_account.address()
-    {
-        return Err(ProgramError::InvalidArgument);
     }
     Ok(())
 }
@@ -1399,65 +1338,6 @@ fn validate_withdrawer(wallet_state: &WalletState, withdrawer: &AccountView) -> 
     Ok(())
 }
 
-fn verify_ed25519(
-    instructions_sysvar: &AccountView,
-    current_instruction_data: &[u8],
-    payload: &ExecutePayload<'_>,
-) -> ProgramResult {
-    let instructions = Instructions::try_from(instructions_sysvar)?;
-    let current_index = instructions.load_current_index();
-    if current_index == 0 {
-        return Err(invalid_instruction(
-            "ed25519 verify missing previous instruction",
-        ));
-    }
-    let previous = instructions.get_instruction_relative(-1)?;
-
-    if previous.get_program_id() != &ed25519_program::ID {
-        return Err(ProgramError::IncorrectProgramId);
-    }
-    let data = previous.get_instruction_data();
-    if data.len() < 16 || data[0] != 1 || data[1] != 0 {
-        return Err(invalid_instruction("ed25519 header invalid"));
-    }
-
-    let signature_offset = read_u16(data, 2)?;
-    let signature_instruction_index = read_u16(data, 4)?;
-    let public_key_offset = read_u16(data, 6)?;
-    let public_key_instruction_index = read_u16(data, 8)?;
-    let message_data_offset = read_u16(data, 10)?;
-    let message_data_size = read_u16(data, 12)?;
-    let message_instruction_index = read_u16(data, 14)?;
-
-    if signature_instruction_index != u16::MAX
-        || public_key_instruction_index != u16::MAX
-        || message_instruction_index != current_index
-        || message_data_offset as usize != EXECUTE_HEADER_LEN
-        || message_data_size as usize != payload.verified_message_len
-    {
-        return Err(invalid_instruction(
-            "ed25519 offsets or message binding invalid",
-        ));
-    }
-    if data.len() < signature_offset as usize + 64 || data.len() < public_key_offset as usize + 32 {
-        return Err(invalid_instruction(
-            "ed25519 signature/pubkey slice out of bounds",
-        ));
-    }
-    if &data[public_key_offset as usize..public_key_offset as usize + 32]
-        != DISCORD_PUBLIC_KEY.as_ref()
-    {
-        return Err(invalid_instruction("ed25519 discord public key mismatch"));
-    }
-    if current_instruction_data.len() != EXECUTE_HEADER_LEN + payload.verified_message_len {
-        return Err(invalid_instruction(
-            "current instruction payload length mismatch",
-        ));
-    }
-
-    Ok(())
-}
-
 fn reject_stale_timestamp(timestamp: &str) -> Result<i64, ProgramError> {
     let parsed = parse_i64_decimal(timestamp)?;
     let now = Clock::get()?.unix_timestamp;
@@ -1576,7 +1456,7 @@ fn parse_interaction(raw_body: &str) -> Result<ParsedInteraction<'_>, ProgramErr
     JsonParser::new(raw_body.as_bytes()).parse_interaction()
 }
 
-fn read_u16(data: &[u8], offset: usize) -> Result<u16, ProgramError> {
+pub(crate) fn read_u16_le(data: &[u8], offset: usize) -> Result<u16, ProgramError> {
     let bytes = data
         .get(offset..offset + 2)
         .ok_or_else(|| invalid_instruction("u16 read out of bounds"))?;
@@ -1697,10 +1577,25 @@ fn parse_token_mint(value: &str) -> Result<Option<Address>, ProgramError> {
     if is_sol_token(value) {
         return Ok(None);
     }
+    if let Some(address) = whitelisted_token_mint(value) {
+        return Ok(Some(address));
+    }
     if let Ok(address) = Address::from_str(value) {
         return Ok(Some(address));
     }
     Err(invalid_instruction("unsupported token symbol"))
+}
+
+fn whitelisted_token_mint(value: &str) -> Option<Address> {
+    if value.eq_ignore_ascii_case("usdc") {
+        Some(USDC_MINT)
+    } else if value.eq_ignore_ascii_case("usdt") {
+        Some(USDT_MINT)
+    } else if value.eq_ignore_ascii_case("jup") {
+        Some(JUP_MINT)
+    } else {
+        None
+    }
 }
 
 fn build_transfer_command<'a>(
@@ -2197,11 +2092,31 @@ impl<'a> JsonParser<'a> {
     }
 }
 
-fn invalid_instruction(reason: &'static str) -> ProgramError {
+pub(crate) fn invalid_instruction(reason: &'static str) -> ProgramError {
     log_message(reason);
     ProgramError::InvalidInstructionData
 }
 
 fn log_message(message: &str) {
     log(message);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::{parse_token_mint, Address, JUP_MINT, USDC_MINT, USDT_MINT};
+
+    #[test]
+    fn token_symbol_aliases_resolve_to_mainnet_mints() {
+        assert_eq!(parse_token_mint("usdc").unwrap(), Some(USDC_MINT));
+        assert_eq!(parse_token_mint("USDT").unwrap(), Some(USDT_MINT));
+        assert_eq!(parse_token_mint("jUp").unwrap(), Some(JUP_MINT));
+
+        let direct_mint = Address::from_str("So11111111111111111111111111111111111111112").unwrap();
+        assert_eq!(
+            parse_token_mint("So11111111111111111111111111111111111111112").unwrap(),
+            Some(direct_mint)
+        );
+    }
 }

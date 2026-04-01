@@ -21,6 +21,7 @@ const port = Number(process.env.PORT ?? "3000");
 
 const appId = process.env.DISCORD_APPLICATION_ID;
 const botToken = process.env.DISCORD_BOT_TOKEN;
+const guildId = process.env.DISCORD_GUILD_ID;
 const publicInteractionsUrl = process.env.PUBLIC_INTERACTIONS_URL;
 const args = new Set(Bun.argv.slice(2));
 const skipDeploy = args.has("--skip-deploy");
@@ -106,8 +107,10 @@ console.log(`Public interactions endpoint: ${interactionsEndpointUrl}`);
 
 if (botToken && appId) {
   try {
-    await updateInteractionEndpoint(botToken, interactionsEndpointUrl);
-    console.log("Updated Discord interactions endpoint.");
+    const application = await updateInteractionEndpoint(botToken, interactionsEndpointUrl);
+    console.log(
+      `Updated Discord interactions endpoint to ${application.interactions_endpoint_url}.`,
+    );
   } catch (error) {
     console.error(
       `Could not update the interactions endpoint automatically: ${(error as Error).message}`,
@@ -117,8 +120,12 @@ if (botToken && appId) {
     );
   }
 
-  await upsertWalletCommands(botToken, appId);
-  console.log("Upserted wallet, wallet_init, set_withdrawer, and transfer commands.");
+  const commands = await upsertWalletCommands(botToken, appId, guildId);
+  console.log(
+    `Updated Discord ${guildId ? `guild ${guildId}` : "global"} commands: ${commands
+      .map((command) => command.name)
+      .join(", ")}.`,
+  );
 } else {
   console.log(
     "DISCORD_APPLICATION_ID or DISCORD_BOT_TOKEN not set; skipping endpoint update and command registration.",

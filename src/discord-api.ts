@@ -1,5 +1,30 @@
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 
+type DiscordApplication = {
+  id: string;
+  interactions_endpoint_url: string | null;
+};
+
+type DiscordCommand = {
+  id: string;
+  name: string;
+  type: number;
+};
+
+export async function getCurrentApplication(botToken: string): Promise<DiscordApplication> {
+  const response = await fetch(`${DISCORD_API_BASE}/applications/@me`, {
+    headers: {
+      authorization: `Bot ${botToken}`,
+    },
+  });
+  if (!response.ok) {
+    throw new Error(
+      `failed to get current application: ${response.status} ${await response.text()}`,
+    );
+  }
+  return response.json() as Promise<DiscordApplication>;
+}
+
 export async function updateInteractionEndpoint(
   botToken: string,
   interactionsEndpointUrl: string,
@@ -20,27 +45,56 @@ export async function updateInteractionEndpoint(
       `failed to update interactions endpoint: ${response.status} ${await response.text()}`,
     );
   }
+
+  const application = await getCurrentApplication(botToken);
+  if (application.interactions_endpoint_url !== interactionsEndpointUrl) {
+    throw new Error(
+      `Discord kept interactions endpoint ${application.interactions_endpoint_url ?? "null"} instead of ${interactionsEndpointUrl}`,
+    );
+  }
+
+  return application;
 }
 
-export async function upsertWalletCommands(botToken: string, applicationId: string) {
-  for (const command of commandDefinitions()) {
-    const response = await fetch(
-      `${DISCORD_API_BASE}/applications/${applicationId}/commands`,
-      {
-        method: "POST",
-        headers: {
-          authorization: `Bot ${botToken}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(command),
+export async function upsertWalletCommands(
+  botToken: string,
+  applicationId: string,
+  guildId?: string,
+): Promise<DiscordCommand[]> {
+  const commands = commandDefinitions();
+  const url = guildId
+    ? `${DISCORD_API_BASE}/applications/${applicationId}/guilds/${guildId}/commands`
+    : `${DISCORD_API_BASE}/applications/${applicationId}/commands`;
+  const response = await fetch(
+    url,
+    {
+      method: "PUT",
+      headers: {
+        authorization: `Bot ${botToken}`,
+        "content-type": "application/json",
       },
+      body: JSON.stringify(commands),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `failed to overwrite commands: ${response.status} ${await response.text()}`,
     );
-    if (!response.ok) {
-      throw new Error(
-        `failed to upsert command ${command.name}: ${response.status} ${await response.text()}`,
-      );
-    }
   }
+
+  const updatedCommands = (await response.json()) as DiscordCommand[];
+  const expectedNames = new Set(commands.map((command) => command.name));
+  const actualNames = new Set(updatedCommands.map((command) => command.name));
+  if (
+    updatedCommands.length !== commands.length ||
+    commands.some((command) => !actualNames.has(command.name))
+  ) {
+    throw new Error(
+      `Discord returned command set [${updatedCommands.map((command) => command.name).join(", ")}] instead of [${[...expectedNames].join(", ")}]`,
+    );
+  }
+
+  return updatedCommands;
 }
 
 function commandDefinitions() {
@@ -54,6 +108,14 @@ function commandDefinitions() {
       type: 1,
       integration_types,
       contexts,
+      options: [
+        {
+          type: 6,
+          name: "user",
+          description: "Optional Discord user to inspect",
+          required: false,
+        },
+      ],
     },
     {
       name: "wallet_init",
@@ -87,7 +149,7 @@ function commandDefinitions() {
         {
           type: 3,
           name: "tkn",
-          description: "Use sol or a token mint address",
+          description: "Use sol, usdc, usdt, jup, or a token mint address",
           required: true,
         },
         {

@@ -34,7 +34,9 @@ DISCORD_PUBLIC_KEY=<discord-app-public-key> cargo build-sbf --manifest-path prog
 bun run real:e2e
 ```
 
-The helper deploys `target/deploy/discord_wallet.so` to the configured localnet with `relayer-keypair.json`, starts the local bot server, opens a `trycloudflare` tunnel if needed, attempts to update the Discord interactions endpoint, and upserts the `wallet`, `wallet_init`, `set_withdrawer`, and `transfer` commands.
+The helper deploys `target/deploy/discord_wallet.so` to the configured localnet with `relayer-keypair.json`, starts the local bot server, opens a `trycloudflare` tunnel if needed, attempts to update the Discord interactions endpoint, and overwrites the `wallet`, `wallet_init`, `set_withdrawer`, and `transfer` commands.
+
+For fast iteration in a test server, set `DISCORD_GUILD_ID`. That makes the sync use guild-scoped commands, which update immediately. Without it, the sync updates global commands, which can appear stale in the Discord client for a while.
 
 To run against the program already deployed on localnet:
 

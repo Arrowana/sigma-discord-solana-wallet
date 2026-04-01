@@ -19,6 +19,7 @@ import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
   findAssociatedTokenPda,
+  getCreateAssociatedTokenIdempotentInstruction,
   TOKEN_PROGRAM_ADDRESS,
 } from "@solana-program/token";
 
@@ -36,6 +37,9 @@ import {
 import type { DiscordInteraction } from "./discord";
 
 const ADDRESS_ENCODER = getAddressEncoder();
+const USDC_MINT = address("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+const USDT_MINT = address("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB");
+const JUP_MINT = address("JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN");
 
 export async function walletStatePda(
   programId: Address,
@@ -130,7 +134,8 @@ export async function buildDiscordCommandTransaction(params: {
     interaction.member.user.id,
   );
   const sourceVault = await vaultPda(programId, sourceWalletState);
-  const { discriminator, accounts } = await buildInstructionAccounts({
+  const { discriminator, accounts, setupInstructions = [] } =
+    await buildInstructionAccounts({
     interaction,
     programId,
     relayer,
@@ -147,10 +152,11 @@ export async function buildDiscordCommandTransaction(params: {
     accounts,
     data: instructionData,
   };
+  const commandInstructionIndex = setupInstructions.length + 1;
   const ed25519Ix = buildEd25519VerifyInstruction({
     signatureHex,
     publicKey: discordPublicKey,
-    messageInstructionIndex: 1,
+    messageInstructionIndex: commandInstructionIndex,
     messageDataOffset: EXECUTE_HEADER_LEN,
     messageDataSize: instructionData.length - EXECUTE_HEADER_LEN,
   });
@@ -161,7 +167,10 @@ export async function buildDiscordCommandTransaction(params: {
     (message) =>
       setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, message),
     (message) =>
-      appendTransactionMessageInstructions([ed25519Ix, commandIx], message),
+      appendTransactionMessageInstructions(
+        [...setupInstructions, ed25519Ix, commandIx],
+        message,
+      ),
   );
 
   return {
@@ -266,7 +275,7 @@ async function buildTransferInstructionAccounts(params: {
     };
   }
 
-  const mint = parseAddress(tokenSpecifier, "unsupported token symbol");
+  const mint = parseTokenMint(tokenSpecifier);
   const sourceTokenAccount = await associatedTokenAddress(sourceVault, mint);
   const discordMentionId = parseDiscordMention(destination);
   if (discordMentionId) {
@@ -279,11 +288,21 @@ async function buildTransferInstructionAccounts(params: {
       destinationVault,
       mint,
     );
-    return {
-      discriminator: TOKEN_TRANSFER_DISCRIMINATOR,
-      accounts: [
-        signerMeta(relayer),
-        writableMeta(sourceWalletState),
+      return {
+        discriminator: TOKEN_TRANSFER_DISCRIMINATOR,
+        setupInstructions: [
+          getCreateAssociatedTokenIdempotentInstruction({
+            payer: relayer,
+            ata: destinationTokenAccount,
+            owner: destinationVault,
+            mint,
+            systemProgram: SYSTEM_PROGRAM_ADDRESS,
+            tokenProgram: TOKEN_PROGRAM_ADDRESS,
+          }),
+        ],
+        accounts: [
+          signerMeta(relayer),
+          writableMeta(sourceWalletState),
         readonlyMeta(sourceVault),
         readonlyMeta(mint),
         writableMeta(sourceTokenAccount),
@@ -305,6 +324,16 @@ async function buildTransferInstructionAccounts(params: {
   );
   return {
     discriminator: TOKEN_TRANSFER_DISCRIMINATOR,
+    setupInstructions: [
+      getCreateAssociatedTokenIdempotentInstruction({
+        payer: relayer,
+        ata: destinationTokenAccount,
+        owner: destinationOwner,
+        mint,
+        systemProgram: SYSTEM_PROGRAM_ADDRESS,
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
+      }),
+    ],
     accounts: [
       signerMeta(relayer),
       writableMeta(sourceWalletState),
@@ -340,6 +369,19 @@ function parseAddress(value: string, errorMessage: string): Address {
   } catch {
     throw new Error(errorMessage);
   }
+}
+
+function parseTokenMint(value: string): Address {
+  if (value.toLowerCase() === "usdc") {
+    return USDC_MINT;
+  }
+  if (value.toLowerCase() === "usdt") {
+    return USDT_MINT;
+  }
+  if (value.toLowerCase() === "jup") {
+    return JUP_MINT;
+  }
+  return parseAddress(value, "unsupported token symbol");
 }
 
 function parseDiscordMention(value: string): string | null {

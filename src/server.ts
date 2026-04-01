@@ -59,7 +59,9 @@ export function createBotHandler(config: BotConfig) {
 
     try {
       if (interaction.data.name === "wallet" && config.walletSummary) {
-        return responseMessage(await config.walletSummary(interaction.member.user.id));
+        return responseMessage(
+          await config.walletSummary(walletTargetUserId(interaction)),
+        );
       }
 
       if (
@@ -102,6 +104,16 @@ export function createBotHandler(config: BotConfig) {
       return responseMessage(`error:${(error as Error).message}`);
     }
   };
+}
+
+function walletTargetUserId(
+  interaction: Extract<DiscordInteraction, { type: 2 }>,
+): string {
+  const value = interaction.data.options?.find((option) => option.name === "user")?.value;
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+  return interaction.member.user.id;
 }
 
 export function createBotServer(config: BotConfig): BotServer {
