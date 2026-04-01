@@ -427,6 +427,46 @@ fn discord_transfer_token_to_mentioned_user_vault_ata_works() {
     assert_eq!(recipient_account.amount, 500_000);
 }
 
+#[test]
+fn discord_transfer_sol_to_address_rejects_invalid_signature() {
+    let mut svm = new_svm();
+    let relayer = funded_keypair(&mut svm, 10_000_000_000);
+    let recipient = funded_keypair(&mut svm, 1_000_000);
+
+    execute_discord_command(
+        &mut svm,
+        &relayer,
+        INTERACTION_ONE,
+        USER_ID,
+        "wallet_init",
+        &[],
+    )
+    .unwrap();
+
+    let wallet_state = wallet_pda(USER_ID, &PROGRAM_ID).0;
+    let vault = vault_pda(&wallet_state, &PROGRAM_ID).0;
+    svm.airdrop(&vault, 2_000_000_000).unwrap();
+    let before = svm.get_balance(&recipient.pubkey()).unwrap();
+
+    let error = execute_discord_command_with_signature(
+        &mut svm,
+        &relayer,
+        INTERACTION_TWO,
+        USER_ID,
+        "transfer",
+        &[("tkn", "sol"), ("amt", "1"), ("to", &recipient.pubkey().to_string())],
+        &Keypair::new(),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error.err,
+        TransactionError::InstructionError(0, InstructionError::Custom(2))
+    );
+    let after = svm.get_balance(&recipient.pubkey()).unwrap();
+    assert_eq!(after, before);
+}
+
 fn new_svm() -> LiteSVM {
     let mut svm = LiteSVM::new();
     svm.add_program_from_file(PROGRAM_ID, program_so_path())
@@ -447,6 +487,26 @@ fn execute_discord_command(
     user_id: u64,
     name: &str,
     options: &[(&str, &str)],
+) -> Result<(), FailedTransactionMetadata> {
+    execute_discord_command_with_signature(
+        svm,
+        relayer,
+        interaction_id,
+        user_id,
+        name,
+        options,
+        &discord_signer(),
+    )
+}
+
+fn execute_discord_command_with_signature(
+    svm: &mut LiteSVM,
+    relayer: &Keypair,
+    interaction_id: u64,
+    user_id: u64,
+    name: &str,
+    options: &[(&str, &str)],
+    signature_signer: &Keypair,
 ) -> Result<(), FailedTransactionMetadata> {
     let timestamp = svm.get_sysvar::<Clock>().unix_timestamp.to_string();
     let raw_body = raw_body(interaction_id, user_id, name, options);
@@ -481,7 +541,7 @@ fn execute_discord_command(
         data: instruction_data.clone(),
     };
     let message = verified_message(&timestamp, &raw_body);
-    let signature = discord_signer().sign_message(&message);
+    let signature = signature_signer.sign_message(&message);
     let ed25519_ix = ed25519_instruction(
         signature.as_array(),
         &discord_signer().pubkey(),
