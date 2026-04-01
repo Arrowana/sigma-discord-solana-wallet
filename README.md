@@ -1,5 +1,9 @@
 # sigma
 
+<p align="center">
+  <img src="media/sigma.jpg" alt="sigma" width="180" />
+</p>
+
 sigma is a Discord-native Solana wallet.
 
 The core trust assumption is simple: wallet actions only execute when the command was signed by the Discord app. The bot or relayer does not invent authority; it just forwards the request and pays fees.
@@ -27,7 +31,7 @@ More info about larger TX [SIMD-0296](https://github.com/solana-foundation/solan
 - On-chain program: [lib.rs](REDACTED/projects/experiments/discord-solana-wallet-bot/programs/discord-wallet/src/lib.rs)
 - Signature verification helper: [sigverify.rs](REDACTED/projects/experiments/discord-solana-wallet-bot/programs/discord-wallet/src/sigverify.rs)
 - Worker entrypoint: [worker.ts](REDACTED/projects/experiments/discord-solana-wallet-bot/src/worker.ts)
-- Landing page: [index.html](REDACTED/projects/experiments/discord-solana-wallet-bot/pages/index.html)
+- Site: [index.html](REDACTED/projects/experiments/discord-solana-wallet-bot/docs/index.html)
 
 ## Test
 

@@ -1,5 +1,5 @@
 {
-  "name": "discord-solana-wallet-bot",
+  "name": "sigma-discord-solana-wallet",
   "private": true,
   "type": "module",
   "scripts": {
