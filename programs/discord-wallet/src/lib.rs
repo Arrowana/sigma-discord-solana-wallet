@@ -510,7 +510,9 @@ impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a ParsedInteraction<'a>)>
                     return Err(ProgramError::IncorrectProgramId);
                 }
                 if !wallet_state.is_writable() || !vault.is_writable() {
-                    return Err(ProgramError::InvalidAccountData);
+                    return Err(invalid_account_data(
+                        "wallet_init requires writable wallet_state and vault",
+                    ));
                 }
 
                 let (expected_wallet, _) = wallet_pda(interaction.user_id, program_id);
@@ -534,7 +536,9 @@ impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a ParsedInteraction<'a>)>
 
                 validate_execute_common_accounts(payer, instructions_sysvar)?;
                 if !wallet_state.is_writable() {
-                    return Err(ProgramError::InvalidAccountData);
+                    return Err(invalid_account_data(
+                        "set_withdrawer requires writable wallet_state",
+                    ));
                 }
 
                 let (expected_wallet, _) = wallet_pda(interaction.user_id, program_id);
@@ -608,7 +612,9 @@ impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a ParsedInteraction<'a>)>
                     || !source_vault.is_writable()
                     || !destination_vault.is_writable()
                 {
-                    return Err(ProgramError::InvalidAccountData);
+                    return Err(invalid_account_data(
+                        "sol transfer user requires writable source wallet_state, source vault, and destination vault",
+                    ));
                 }
 
                 let (expected_destination_wallet, _) = wallet_pda(destination_user_id, program_id);
@@ -736,7 +742,9 @@ impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a WithdrawPayload)> for With
                     return Err(ProgramError::MissingRequiredSignature);
                 }
                 if !vault.is_writable() || !destination.is_writable() {
-                    return Err(ProgramError::InvalidAccountData);
+                    return Err(invalid_account_data(
+                        "withdraw sol requires writable vault and destination",
+                    ));
                 }
                 if system_program.address() != &pinocchio_system::ID {
                     return Err(ProgramError::IncorrectProgramId);
@@ -760,7 +768,9 @@ impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a WithdrawPayload)> for With
                     return Err(ProgramError::MissingRequiredSignature);
                 }
                 if !source_token_account.is_writable() || !destination_token_account.is_writable() {
-                    return Err(ProgramError::InvalidAccountData);
+                    return Err(invalid_account_data(
+                        "withdraw token requires writable source and destination token accounts",
+                    ));
                 }
                 if token_program.address() != &TOKEN_PROGRAM_ID {
                     return Err(ProgramError::IncorrectProgramId);
@@ -801,7 +811,9 @@ fn validate_sol_transfer_accounts(
         || !source_vault.is_writable()
         || !destination.is_writable()
     {
-        return Err(ProgramError::InvalidAccountData);
+        return Err(invalid_account_data(
+            "sol transfer requires writable source wallet_state, source vault, and destination",
+        ));
     }
     Ok(())
 }
@@ -824,7 +836,9 @@ fn validate_token_transfer_accounts(
         || !source_token_account.is_writable()
         || !destination_token_account.is_writable()
     {
-        return Err(ProgramError::InvalidAccountData);
+        return Err(invalid_account_data(
+            "token transfer requires writable source wallet_state, source token account, and destination token account",
+        ));
     }
     Ok(())
 }
@@ -1219,10 +1233,15 @@ fn validate_and_parse_token_transfer(
         return Err(ProgramError::InvalidSeeds);
     }
 
-    let mint = Mint::from_account_view(mint_account)?;
-    let source_token_account = TokenAccount::from_account_view(source_token_account_view)?;
-    let destination_token_account =
-        TokenAccount::from_account_view(destination_token_account_view)?;
+    let mint = parse_mint_account(mint_account, "token transfer mint account data invalid")?;
+    let source_token_account = parse_token_account(
+        source_token_account_view,
+        "token transfer source token account data invalid",
+    )?;
+    let destination_token_account = parse_token_account(
+        destination_token_account_view,
+        "token transfer destination token account data invalid",
+    )?;
     validate_token_transfer_state(
         source_vault,
         mint_address,
@@ -1245,7 +1264,7 @@ fn invoke_token_transfer(
     vault_bump: u8,
     amount: u64,
 ) -> ProgramResult {
-    let decimals = Mint::from_account_view(mint)?.decimals();
+    let decimals = parse_mint_account(mint, "token transfer mint account data invalid")?.decimals();
     let vault_bump_seed = [vault_bump];
     let vault_signer_seeds = [
         Seed::from(SEED_VAULT),
@@ -1293,10 +1312,15 @@ fn process_withdraw_token(
     }
 
     let decimals = {
-        let mint = Mint::from_account_view(accounts.mint)?;
-        let source_token_account = TokenAccount::from_account_view(accounts.source_token_account)?;
-        let destination_token_account =
-            TokenAccount::from_account_view(accounts.destination_token_account)?;
+        let mint = parse_mint_account(accounts.mint, "withdraw mint account data invalid")?;
+        let source_token_account = parse_token_account(
+            accounts.source_token_account,
+            "withdraw source token account data invalid",
+        )?;
+        let destination_token_account = parse_token_account(
+            accounts.destination_token_account,
+            "withdraw destination token account data invalid",
+        )?;
         validate_token_transfer_state(
             accounts.vault.address(),
             mint_address,
@@ -1378,12 +1402,12 @@ fn read_wallet_state(
         return Err(ProgramError::InvalidAccountOwner);
     }
     if account.data_len() != WALLET_STATE_DATA_LEN {
-        return Err(ProgramError::InvalidAccountData);
+        return Err(invalid_account_data("wallet_state data length invalid"));
     }
 
     let data = account.try_borrow()?;
     if data[0] != WALLET_STATE_TAG {
-        return Err(ProgramError::InvalidAccountData);
+        return Err(invalid_account_data("wallet_state tag invalid"));
     }
 
     Ok(WalletState {
@@ -1392,20 +1416,22 @@ fn read_wallet_state(
         discord_user_id: u64::from_le_bytes(
             data[3..11]
                 .try_into()
-                .map_err(|_| ProgramError::InvalidAccountData)?,
+                .map_err(|_| invalid_account_data("wallet_state discord_user_id bytes invalid"))?,
         ),
         last_timestamp: i64::from_le_bytes(
             data[11..19]
                 .try_into()
-                .map_err(|_| ProgramError::InvalidAccountData)?,
+                .map_err(|_| invalid_account_data("wallet_state last_timestamp bytes invalid"))?,
         ),
         last_interaction_id: u64::from_le_bytes(
             data[19..27]
                 .try_into()
-                .map_err(|_| ProgramError::InvalidAccountData)?,
+                .map_err(|_| {
+                    invalid_account_data("wallet_state last_interaction_id bytes invalid")
+                })?,
         ),
         withdrawer: Address::try_from(&data[27..59])
-            .map_err(|_| ProgramError::InvalidAccountData)?,
+            .map_err(|_| invalid_account_data("wallet_state withdrawer bytes invalid"))?,
     })
 }
 
@@ -1419,6 +1445,20 @@ fn write_wallet_state(account: &AccountView, state: WalletState) -> ProgramResul
     data[19..27].copy_from_slice(&state.last_interaction_id.to_le_bytes());
     data[27..59].copy_from_slice(state.withdrawer.as_ref());
     Ok(())
+}
+
+fn parse_mint_account<'a>(
+    account: &'a AccountView,
+    reason: &'static str,
+) -> Result<impl core::ops::Deref<Target = Mint> + 'a, ProgramError> {
+    Mint::from_account_view(account).map_err(|_| invalid_account_data(reason))
+}
+
+fn parse_token_account<'a>(
+    account: &'a AccountView,
+    reason: &'static str,
+) -> Result<impl core::ops::Deref<Target = TokenAccount> + 'a, ProgramError> {
+    TokenAccount::from_account_view(account).map_err(|_| invalid_account_data(reason))
 }
 
 pub fn wallet_pda(user_id: u64, program_id: &Address) -> (Address, u8) {
@@ -1447,7 +1487,9 @@ fn validate_token_transfer_state(
         return Err(ProgramError::IllegalOwner);
     }
     if destination_token_account.mint() != mint_address {
-        return Err(ProgramError::InvalidAccountData);
+        return Err(invalid_account_data(
+            "destination token account mint does not match requested mint",
+        ));
     }
     Ok(())
 }
@@ -2095,6 +2137,11 @@ impl<'a> JsonParser<'a> {
 pub(crate) fn invalid_instruction(reason: &'static str) -> ProgramError {
     log_message(reason);
     ProgramError::InvalidInstructionData
+}
+
+pub(crate) fn invalid_account_data(reason: &'static str) -> ProgramError {
+    log_message(reason);
+    ProgramError::InvalidAccountData
 }
 
 fn log_message(message: &str) {

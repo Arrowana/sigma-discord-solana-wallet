@@ -6,7 +6,6 @@
     "deploy:localnet": "./scripts/deploy-localnet-program.sh",
     "e2e": "cargo test -p discord-wallet --test litesvm -- --nocapture",
     "real:e2e": "bun run src/real-e2e.ts",
-    "send:v1": "bun run src/send-v1-transfer.ts",
     "start": "bun run src/index.ts",
     "sync:discord": "bun run src/sync-discord.ts",
     "tunnel": "bun run src/tunnel.ts"
