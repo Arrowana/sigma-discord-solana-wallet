@@ -8,18 +8,18 @@ export const EXECUTE_HEADER_LEN = 5;
 export const MAX_TRANSACTION_SIZE = 4096;
 
 export const DISCORD_SECRET_KEY_BYTES = new Uint8Array([
-  243, 215, 14, 197, 86, 78, 251, 95, 181, 36, 168, 42, 69, 13, 213, 31, 29, 76, 213, 24, 173,
-  16, 52, 24, 254, 35, 182, 130, 136, 167, 71, 65, 98, 198, 251, 212, 221, 147, 204, 209, 242,
-  154, 244, 58, 38, 97, 65, 123, 209, 247, 77, 25, 153, 241, 68, 65, 203, 18, 79, 150, 43, 91,
-  74, 76,
+  243, 215, 14, 197, 86, 78, 251, 95, 181, 36, 168, 42, 69, 13, 213, 31, 29, 76,
+  213, 24, 173, 16, 52, 24, 254, 35, 182, 130, 136, 167, 71, 65, 98, 198, 251,
+  212, 221, 147, 204, 209, 242, 154, 244, 58, 38, 97, 65, 123, 209, 247, 77, 25,
+  153, 241, 68, 65, 203, 18, 79, 150, 43, 91, 74, 76,
 ]);
 
-export const DEFAULT_DISCORD_PUBLIC_KEY = address("7eawKgepAhdzLrVgTwsn9zoH3EGipCzF4HBxajusY5QF");
-export const SYSTEM_PROGRAM_ID = address("11111111111111111111111111111111");
-export const ED25519_PROGRAM_ID = address("Ed25519SigVerify111111111111111111111111111");
-export const INSTRUCTIONS_SYSVAR_ID = address("Sysvar1nstructions1111111111111111111111111");
-export const TOKEN_PROGRAM_ID = address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-export const ASSOCIATED_TOKEN_PROGRAM_ID = address("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+export const DEFAULT_DISCORD_PUBLIC_KEY = address(
+  "7eawKgepAhdzLrVgTwsn9zoH3EGipCzF4HBxajusY5QF",
+);
+export const ED25519_PROGRAM_ID = address(
+  "Ed25519SigVerify111111111111111111111111111",
+);
 
 const TEXT_ENCODER = new TextEncoder();
 

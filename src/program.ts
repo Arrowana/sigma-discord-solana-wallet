@@ -14,18 +14,21 @@ import {
   type KeyPairSigner,
   type Transaction,
 } from "@solana/kit";
+import { SYSVAR_INSTRUCTIONS_ADDRESS } from "@solana/sysvars";
+import { SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
+import {
+  ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
+  findAssociatedTokenPda,
+  TOKEN_PROGRAM_ADDRESS,
+} from "@solana-program/token";
 
 import {
-  ASSOCIATED_TOKEN_PROGRAM_ID,
   DEFAULT_DISCORD_PUBLIC_KEY,
   ED25519_PROGRAM_ID,
   EXECUTE_DISCRIMINATOR,
   EXECUTE_HEADER_LEN,
-  INSTRUCTIONS_SYSVAR_ID,
   MAX_TRANSACTION_SIZE,
-  SYSTEM_PROGRAM_ID,
   SYSTEM_TRANSFER_DISCRIMINATOR,
-  TOKEN_PROGRAM_ID,
   TOKEN_TRANSFER_DISCRIMINATOR,
   VAULT_SEED,
   WALLET_SEED,
@@ -63,14 +66,16 @@ export async function associatedTokenAddress(
   mint: Address,
 ): Promise<Address> {
   return (
-    await getProgramDerivedAddress({
-      programAddress: ASSOCIATED_TOKEN_PROGRAM_ID,
-      seeds: [
-        ADDRESS_ENCODER.encode(owner),
-        ADDRESS_ENCODER.encode(TOKEN_PROGRAM_ID),
-        ADDRESS_ENCODER.encode(mint),
-      ],
-    })
+    await findAssociatedTokenPda(
+      {
+        owner,
+        tokenProgram: TOKEN_PROGRAM_ADDRESS,
+        mint,
+      },
+      {
+        programAddress: ASSOCIATED_TOKEN_PROGRAM_ADDRESS,
+      },
+    )
   )[0];
 }
 
@@ -120,7 +125,10 @@ export async function buildDiscordCommandTransaction(params: {
     throw new Error("guild interactions are required");
   }
 
-  const sourceWalletState = await walletStatePda(programId, interaction.member.user.id);
+  const sourceWalletState = await walletStatePda(
+    programId,
+    interaction.member.user.id,
+  );
   const sourceVault = await vaultPda(programId, sourceWalletState);
   const { discriminator, accounts } = await buildInstructionAccounts({
     interaction,
@@ -129,7 +137,11 @@ export async function buildDiscordCommandTransaction(params: {
     sourceWalletState,
     sourceVault,
   });
-  const instructionData = encodeInteractionInstruction(discriminator, timestamp, rawBody);
+  const instructionData = encodeInteractionInstruction(
+    discriminator,
+    timestamp,
+    rawBody,
+  );
   const commandIx = {
     programAddress: programId,
     accounts,
@@ -152,7 +164,11 @@ export async function buildDiscordCommandTransaction(params: {
       appendTransactionMessageInstructions([ed25519Ix, commandIx], message),
   );
 
-  return { transactionMessage, walletState: sourceWalletState, vault: sourceVault };
+  return {
+    transactionMessage,
+    walletState: sourceWalletState,
+    vault: sourceVault,
+  };
 }
 
 async function buildInstructionAccounts(params: {
@@ -162,7 +178,8 @@ async function buildInstructionAccounts(params: {
   sourceWalletState: Address;
   sourceVault: Address;
 }) {
-  const { interaction, programId, relayer, sourceWalletState, sourceVault } = params;
+  const { interaction, programId, relayer, sourceWalletState, sourceVault } =
+    params;
   switch (interaction.data.name) {
     case "wallet_init":
       return {
@@ -171,8 +188,8 @@ async function buildInstructionAccounts(params: {
           signerMeta(relayer),
           writableMeta(sourceWalletState),
           writableMeta(sourceVault),
-          readonlyMeta(INSTRUCTIONS_SYSVAR_ID),
-          readonlyMeta(SYSTEM_PROGRAM_ID),
+          readonlyMeta(SYSVAR_INSTRUCTIONS_ADDRESS),
+          readonlyMeta(SYSTEM_PROGRAM_ADDRESS),
         ],
       };
     case "set_withdrawer":
@@ -181,7 +198,7 @@ async function buildInstructionAccounts(params: {
         accounts: [
           signerMeta(relayer),
           writableMeta(sourceWalletState),
-          readonlyMeta(INSTRUCTIONS_SYSVAR_ID),
+          readonlyMeta(SYSVAR_INSTRUCTIONS_ADDRESS),
         ],
       };
     case "transfer":
@@ -204,15 +221,22 @@ async function buildTransferInstructionAccounts(params: {
   sourceWalletState: Address;
   sourceVault: Address;
 }) {
-  const { interaction, relayer, programId, sourceWalletState, sourceVault } = params;
+  const { interaction, relayer, programId, sourceWalletState, sourceVault } =
+    params;
   const tokenSpecifier = optionStringValue(interaction, "tkn");
   const destination = optionStringValue(interaction, "to");
 
   if (tokenSpecifier.toLowerCase() === "sol") {
     const discordMentionId = parseDiscordMention(destination);
     if (discordMentionId) {
-      const destinationWalletState = await walletStatePda(programId, discordMentionId);
-      const destinationVault = await vaultPda(programId, destinationWalletState);
+      const destinationWalletState = await walletStatePda(
+        programId,
+        discordMentionId,
+      );
+      const destinationVault = await vaultPda(
+        programId,
+        destinationWalletState,
+      );
       return {
         discriminator: SYSTEM_TRANSFER_DISCRIMINATOR,
         accounts: [
@@ -221,8 +245,8 @@ async function buildTransferInstructionAccounts(params: {
           writableMeta(sourceVault),
           readonlyMeta(destinationWalletState),
           writableMeta(destinationVault),
-          readonlyMeta(INSTRUCTIONS_SYSVAR_ID),
-          readonlyMeta(SYSTEM_PROGRAM_ID),
+          readonlyMeta(SYSVAR_INSTRUCTIONS_ADDRESS),
+          readonlyMeta(SYSTEM_PROGRAM_ADDRESS),
         ],
       };
     }
@@ -233,9 +257,11 @@ async function buildTransferInstructionAccounts(params: {
         signerMeta(relayer),
         writableMeta(sourceWalletState),
         writableMeta(sourceVault),
-        writableMeta(parseAddress(destination, "transfer destination address invalid")),
-        readonlyMeta(INSTRUCTIONS_SYSVAR_ID),
-        readonlyMeta(SYSTEM_PROGRAM_ID),
+        writableMeta(
+          parseAddress(destination, "transfer destination address invalid"),
+        ),
+        readonlyMeta(SYSVAR_INSTRUCTIONS_ADDRESS),
+        readonlyMeta(SYSTEM_PROGRAM_ADDRESS),
       ],
     };
   }
@@ -244,9 +270,15 @@ async function buildTransferInstructionAccounts(params: {
   const sourceTokenAccount = await associatedTokenAddress(sourceVault, mint);
   const discordMentionId = parseDiscordMention(destination);
   if (discordMentionId) {
-    const destinationWalletState = await walletStatePda(programId, discordMentionId);
+    const destinationWalletState = await walletStatePda(
+      programId,
+      discordMentionId,
+    );
     const destinationVault = await vaultPda(programId, destinationWalletState);
-    const destinationTokenAccount = await associatedTokenAddress(destinationVault, mint);
+    const destinationTokenAccount = await associatedTokenAddress(
+      destinationVault,
+      mint,
+    );
     return {
       discriminator: TOKEN_TRANSFER_DISCRIMINATOR,
       accounts: [
@@ -257,8 +289,8 @@ async function buildTransferInstructionAccounts(params: {
         writableMeta(sourceTokenAccount),
         readonlyMeta(destinationWalletState),
         writableMeta(destinationTokenAccount),
-        readonlyMeta(INSTRUCTIONS_SYSVAR_ID),
-        readonlyMeta(TOKEN_PROGRAM_ID),
+        readonlyMeta(SYSVAR_INSTRUCTIONS_ADDRESS),
+        readonlyMeta(TOKEN_PROGRAM_ADDRESS),
       ],
     };
   }
@@ -267,7 +299,10 @@ async function buildTransferInstructionAccounts(params: {
     destination,
     "transfer destination address invalid",
   );
-  const destinationTokenAccount = await associatedTokenAddress(destinationOwner, mint);
+  const destinationTokenAccount = await associatedTokenAddress(
+    destinationOwner,
+    mint,
+  );
   return {
     discriminator: TOKEN_TRANSFER_DISCRIMINATOR,
     accounts: [
@@ -277,8 +312,8 @@ async function buildTransferInstructionAccounts(params: {
       readonlyMeta(mint),
       writableMeta(sourceTokenAccount),
       writableMeta(destinationTokenAccount),
-      readonlyMeta(INSTRUCTIONS_SYSVAR_ID),
-      readonlyMeta(TOKEN_PROGRAM_ID),
+      readonlyMeta(SYSVAR_INSTRUCTIONS_ADDRESS),
+      readonlyMeta(TOKEN_PROGRAM_ADDRESS),
     ],
   };
 }
@@ -382,7 +417,9 @@ export function optionStringValue(
   interaction: Extract<DiscordInteraction, { type: 2 }>,
   name: string,
 ): string {
-  const value = interaction.data.options?.find((option) => option.name === name)?.value;
+  const value = interaction.data.options?.find(
+    (option) => option.name === name,
+  )?.value;
   if (typeof value === "number") {
     return `${value}`;
   }
