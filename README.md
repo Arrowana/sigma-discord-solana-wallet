@@ -28,10 +28,10 @@ More info about larger TX [SIMD-0296](https://github.com/solana-foundation/solan
 
 ## Main Pieces
 
-- On-chain program: [lib.rs](REDACTED/projects/experiments/discord-solana-wallet-bot/programs/discord-wallet/src/lib.rs)
-- Signature verification helper: [sigverify.rs](REDACTED/projects/experiments/discord-solana-wallet-bot/programs/discord-wallet/src/sigverify.rs)
-- Worker entrypoint: [worker.ts](REDACTED/projects/experiments/discord-solana-wallet-bot/src/worker.ts)
-- Site: [index.html](REDACTED/projects/experiments/discord-solana-wallet-bot/docs/index.html)
+- On-chain program: [lib.rs](programs/discord-wallet/src/lib.rs)
+- Signature verification helper: [sigverify.rs](programs/discord-wallet/src/sigverify.rs)
+- Worker entrypoint: [worker.ts](src/worker.ts)
+- Site: [index.html](docs/index.html)
 
 ## Test
 
