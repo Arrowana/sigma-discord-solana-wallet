@@ -4,8 +4,14 @@ import {
   appendTransactionMessageInstructions,
   createTransactionMessage,
   getAddressEncoder,
+  getBytesEncoder,
+  getBase16Encoder,
   getProgramDerivedAddress,
+  getStructEncoder,
   getTransactionEncoder,
+  getU16Encoder,
+  getU64Encoder,
+  getU8Encoder,
   pipe,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
@@ -24,7 +30,6 @@ import {
 } from "@solana-program/token";
 
 import {
-  DEFAULT_DISCORD_PUBLIC_KEY,
   ED25519_PROGRAM_ID,
   EXECUTE_DISCRIMINATOR,
   EXECUTE_HEADER_LEN,
@@ -34,10 +39,32 @@ import {
   VAULT_SEED,
   WALLET_SEED,
 } from "./constants";
-import { hexToBytes, utf8Bytes } from "./bytes";
+import { utf8Bytes } from "./bytes";
 import type { DiscordInteraction } from "./discord";
 
 const ADDRESS_ENCODER = getAddressEncoder();
+const HEX_DECODER = getBase16Encoder();
+const BYTES_ENCODER = getBytesEncoder();
+const U8_ENCODER = getU8Encoder();
+const U16_ENCODER = getU16Encoder();
+const U64_ENCODER = getU64Encoder();
+const INTERACTION_INSTRUCTION_ENCODER = getStructEncoder([
+  ["discriminator", U8_ENCODER],
+  ["timestampLength", U16_ENCODER],
+  ["rawBodyLength", U16_ENCODER],
+  ["verifiedMessage", BYTES_ENCODER],
+]);
+const ED25519_HEADER_ENCODER = getStructEncoder([
+  ["numSignatures", U8_ENCODER],
+  ["padding", U8_ENCODER],
+  ["signatureOffset", U16_ENCODER],
+  ["signatureInstructionIndex", U16_ENCODER],
+  ["publicKeyOffset", U16_ENCODER],
+  ["publicKeyInstructionIndex", U16_ENCODER],
+  ["messageDataOffset", U16_ENCODER],
+  ["messageDataSize", U16_ENCODER],
+  ["messageInstructionIndex", U16_ENCODER],
+]);
 const USDC_MINT = address("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
 const USDT_MINT = address("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB");
 const JUP_MINT = address("JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN");
@@ -91,15 +118,14 @@ export function encodeInteractionInstruction(
 ): Uint8Array {
   const timestampBytes = utf8Bytes(timestamp);
   const rawBodyBytes = utf8Bytes(rawBody);
-  const verifiedMessageLen = timestampBytes.length + rawBodyBytes.length;
-
-  const data = new Uint8Array(EXECUTE_HEADER_LEN + verifiedMessageLen);
-  data[0] = discriminator;
-  writeU16Le(data, 1, timestampBytes.length);
-  writeU16Le(data, 3, rawBodyBytes.length);
-  data.set(timestampBytes, EXECUTE_HEADER_LEN);
-  data.set(rawBodyBytes, EXECUTE_HEADER_LEN + timestampBytes.length);
-  return data;
+  return Uint8Array.from(
+    INTERACTION_INSTRUCTION_ENCODER.encode({
+      discriminator,
+      timestampLength: timestampBytes.length,
+      rawBodyLength: rawBodyBytes.length,
+      verifiedMessage: concatBytes(timestampBytes, rawBodyBytes),
+    }),
+  );
 }
 
 export async function buildDiscordCommandTransaction(params: {
@@ -113,7 +139,7 @@ export async function buildDiscordCommandTransaction(params: {
     blockhash: Blockhash;
     lastValidBlockHeight: bigint;
   }>;
-  discordPublicKey?: Address;
+  discordPublicKey: Address;
 }) {
   const {
     interaction,
@@ -123,7 +149,7 @@ export async function buildDiscordCommandTransaction(params: {
     programId,
     relayer,
     latestBlockhash,
-    discordPublicKey = DEFAULT_DISCORD_PUBLIC_KEY,
+    discordPublicKey,
   } = params;
 
   if (!interaction.guild_id) {
@@ -135,14 +161,18 @@ export async function buildDiscordCommandTransaction(params: {
     interaction.member.user.id,
   );
   const sourceVault = await vaultPda(programId, sourceWalletState);
-  const { discriminator, accounts, setupInstructions = [] } =
-    await buildInstructionAccounts({
+  const instructionAccounts = await buildInstructionAccounts({
     interaction,
     programId,
     relayer,
     sourceWalletState,
     sourceVault,
   });
+  const { discriminator, accounts } = instructionAccounts;
+  const setupInstructions =
+    "setupInstructions" in instructionAccounts
+      ? (instructionAccounts.setupInstructions ?? [])
+      : [];
   const instructionData = encodeInteractionInstruction(
     discriminator,
     timestamp,
@@ -289,21 +319,21 @@ async function buildTransferInstructionAccounts(params: {
       destinationVault,
       mint,
     );
-      return {
-        discriminator: TOKEN_TRANSFER_DISCRIMINATOR,
-        setupInstructions: [
-          getCreateAssociatedTokenIdempotentInstruction({
-            payer: relayer,
-            ata: destinationTokenAccount,
-            owner: destinationVault,
-            mint,
-            systemProgram: SYSTEM_PROGRAM_ADDRESS,
-            tokenProgram: TOKEN_PROGRAM_ADDRESS,
-          }),
-        ],
-        accounts: [
-          signerMeta(relayer),
-          writableMeta(sourceWalletState),
+    return {
+      discriminator: TOKEN_TRANSFER_DISCRIMINATOR,
+      setupInstructions: [
+        getCreateAssociatedTokenIdempotentInstruction({
+          payer: relayer,
+          ata: destinationTokenAccount,
+          owner: destinationVault,
+          mint,
+          systemProgram: SYSTEM_PROGRAM_ADDRESS,
+          tokenProgram: TOKEN_PROGRAM_ADDRESS,
+        }),
+      ],
+      accounts: [
+        signerMeta(relayer),
+        writableMeta(sourceWalletState),
         readonlyMeta(sourceVault),
         readonlyMeta(mint),
         writableMeta(sourceTokenAccount),
@@ -413,52 +443,35 @@ function buildEd25519VerifyInstruction(params: {
   messageDataOffset: number;
   messageDataSize: number;
 }) {
-  const signature = hexToBytes(params.signatureHex);
+  const signature = HEX_DECODER.encode(params.signatureHex);
   if (signature.length !== 64) {
     throw new Error("discord signature must be 64 bytes");
   }
 
-  const header = new Uint8Array(16);
-  const headerView = new DataView(
-    header.buffer,
-    header.byteOffset,
-    header.byteLength,
-  );
   const signatureOffset = 16;
   const publicKeyOffset = signatureOffset + 64;
-
-  header[0] = 1;
-  header[1] = 0;
-  headerView.setUint16(2, signatureOffset, true);
-  headerView.setUint16(4, 0xffff, true);
-  headerView.setUint16(6, publicKeyOffset, true);
-  headerView.setUint16(8, 0xffff, true);
-  headerView.setUint16(10, params.messageDataOffset, true);
-  headerView.setUint16(12, params.messageDataSize, true);
-  headerView.setUint16(14, params.messageInstructionIndex, true);
+  const header = ED25519_HEADER_ENCODER.encode({
+    numSignatures: 1,
+    padding: 0,
+    signatureOffset,
+    signatureInstructionIndex: 0xffff,
+    publicKeyOffset,
+    publicKeyInstructionIndex: 0xffff,
+    messageDataOffset: params.messageDataOffset,
+    messageDataSize: params.messageDataSize,
+    messageInstructionIndex: params.messageInstructionIndex,
+  });
   const publicKeyBytes = ADDRESS_ENCODER.encode(params.publicKey);
-  const data = new Uint8Array(
-    header.length + signature.length + publicKeyBytes.length,
-  );
-  data.set(header, 0);
-  data.set(signature, header.length);
-  data.set(publicKeyBytes, header.length + signature.length);
 
   return {
     programAddress: ED25519_PROGRAM_ID,
     accounts: [],
-    data,
+    data: concatBytes(header, signature, publicKeyBytes),
   };
 }
 
 function u64Le(value: string): Uint8Array {
-  const encoded = new Uint8Array(8);
-  new DataView(
-    encoded.buffer,
-    encoded.byteOffset,
-    encoded.byteLength,
-  ).setBigUint64(0, BigInt(value), true);
-  return encoded;
+  return Uint8Array.from(U64_ENCODER.encode(BigInt(value)));
 }
 
 export function optionStringValue(
@@ -477,10 +490,13 @@ export function optionStringValue(
   return value;
 }
 
-function writeU16Le(bytes: Uint8Array, offset: number, value: number) {
-  new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).setUint16(
-    offset,
-    value,
-    true,
-  );
+function concatBytes(...chunks: readonly ArrayLike<number>[]): Uint8Array {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const out = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(Uint8Array.from(chunk), offset);
+    offset += chunk.length;
+  }
+  return out;
 }

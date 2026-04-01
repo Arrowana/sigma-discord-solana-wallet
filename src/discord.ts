@@ -1,5 +1,8 @@
 import {
+  address,
   createKeyPairFromBytes,
+  getBase16Decoder,
+  getBase16Encoder,
   getPublicKeyFromAddress,
   signBytes,
   signatureBytes,
@@ -7,10 +10,11 @@ import {
   verifySignature,
 } from "@solana/kit";
 
-import { bytesToHex, hexToBytes, utf8Bytes } from "./bytes";
-import { DEFAULT_DISCORD_PUBLIC_KEY, DISCORD_SECRET_KEY_BYTES } from "./constants";
+import { utf8Bytes } from "./bytes";
 
-let discordSigningKeyPairPromise: Promise<CryptoKeyPair> | undefined;
+const HEX_ENCODER = getBase16Decoder();
+const HEX_DECODER = getBase16Encoder();
+const signingKeyCache = new Map<string, Promise<CryptoKeyPair>>();
 const verificationKeyCache = new Map<Address, Promise<CryptoKey>>();
 
 export type DiscordInteraction =
@@ -26,7 +30,7 @@ export type DiscordInteraction =
         user: { id: string; username?: string };
       };
       data: {
-        name: "wallet" | "wallet_init" | "set_withdrawer" | "transfer";
+        name: "wallet" | "airdrop" | "wallet_init" | "set_withdrawer" | "transfer";
         options?: Array<{ name: string; value: string | number }>;
       };
     };
@@ -34,27 +38,27 @@ export type DiscordInteraction =
 export async function signDiscordRequest(
   timestamp: string,
   rawBody: string,
-  secretKey: Uint8Array = DISCORD_SECRET_KEY_BYTES,
+  secretKey: Uint8Array,
 ): Promise<string> {
   const message = utf8Bytes(timestamp + rawBody);
   const signature = await signBytes(
     await getDiscordPrivateKey(secretKey),
     message,
   );
-  return bytesToHex(signature);
+  return HEX_ENCODER.decode(signature);
 }
 
 export async function verifyDiscordRequest(
   timestamp: string | null,
   signatureHex: string | null,
   rawBody: string,
-  publicKey: Address = DEFAULT_DISCORD_PUBLIC_KEY,
+  publicKey: Address,
 ): Promise<boolean> {
   if (!timestamp || !signatureHex) {
     return false;
   }
   const message = utf8Bytes(timestamp + rawBody);
-  const signature = signatureBytes(hexToBytes(signatureHex));
+  const signature = signatureBytes(HEX_DECODER.encode(signatureHex));
   return verifySignature(
     await getVerificationKey(publicKey),
     signature,
@@ -65,7 +69,7 @@ export async function verifyDiscordRequest(
 export async function discordHeaders(
   timestamp: string,
   rawBody: string,
-  secretKey: Uint8Array = DISCORD_SECRET_KEY_BYTES,
+  secretKey: Uint8Array,
 ): Promise<Headers> {
   const headers = new Headers();
   headers.set("content-type", "application/json");
@@ -78,12 +82,13 @@ export async function discordHeaders(
 }
 
 async function getDiscordPrivateKey(secretKey: Uint8Array): Promise<CryptoKey> {
-  if (secretKey === DISCORD_SECRET_KEY_BYTES) {
-    discordSigningKeyPairPromise ??= createKeyPairFromBytes(secretKey);
-    const { privateKey } = await discordSigningKeyPairPromise;
-    return privateKey;
+  const cacheKey = HEX_ENCODER.decode(secretKey);
+  let cached = signingKeyCache.get(cacheKey);
+  if (!cached) {
+    cached = createKeyPairFromBytes(secretKey);
+    signingKeyCache.set(cacheKey, cached);
   }
-  const { privateKey } = await createKeyPairFromBytes(secretKey);
+  const { privateKey } = await cached;
   return privateKey;
 }
 
@@ -94,4 +99,14 @@ function getVerificationKey(publicKey: Address): Promise<CryptoKey> {
     verificationKeyCache.set(publicKey, cached);
   }
   return cached;
+}
+
+export function requiredDiscordPublicKey(
+  source: Record<string, string | undefined>,
+): Address {
+  const value = source.DISCORD_PUBLIC_KEY;
+  if (!value) {
+    throw new Error("DISCORD_PUBLIC_KEY is required");
+  }
+  return address(value);
 }

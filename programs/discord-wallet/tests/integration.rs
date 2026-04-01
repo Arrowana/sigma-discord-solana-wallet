@@ -271,22 +271,12 @@ fn discord_transfer_sol_to_mentioned_user_vault_works() {
         &[],
     )
     .unwrap();
-    execute_discord_command(
-        &mut svm,
-        &relayer,
-        INTERACTION_TWO,
-        OTHER_USER_ID,
-        "wallet_init",
-        &[],
-    )
-    .unwrap();
-
     let sender_wallet_state = wallet_pda(USER_ID, &PROGRAM_ID).0;
     let sender_vault = vault_pda(&sender_wallet_state, &PROGRAM_ID).0;
     let recipient_wallet_state = wallet_pda(OTHER_USER_ID, &PROGRAM_ID).0;
     let recipient_vault = vault_pda(&recipient_wallet_state, &PROGRAM_ID).0;
     svm.airdrop(&sender_vault, 2_000_000_000).unwrap();
-    let before = svm.get_balance(&recipient_vault).unwrap();
+    let before = svm.get_balance(&recipient_vault).unwrap_or(0);
 
     execute_discord_command(
         &mut svm,
@@ -304,6 +294,17 @@ fn discord_transfer_sol_to_mentioned_user_vault_works() {
 
     let after = svm.get_balance(&recipient_vault).unwrap();
     assert_eq!(after - before, 750_000_000);
+
+    execute_discord_command(
+        &mut svm,
+        &relayer,
+        INTERACTION_TWO,
+        OTHER_USER_ID,
+        "wallet_init",
+        &[],
+    )
+    .unwrap();
+    assert_eq!(svm.get_balance(&recipient_vault).unwrap(), after);
 }
 
 #[test]
@@ -373,16 +374,6 @@ fn discord_transfer_token_to_mentioned_user_vault_ata_works() {
         &[],
     )
     .unwrap();
-    execute_discord_command(
-        &mut svm,
-        &relayer,
-        INTERACTION_TWO,
-        OTHER_USER_ID,
-        "wallet_init",
-        &[],
-    )
-    .unwrap();
-
     let sender_wallet_state = wallet_pda(USER_ID, &PROGRAM_ID).0;
     let sender_vault = vault_pda(&sender_wallet_state, &PROGRAM_ID).0;
     let recipient_wallet_state = wallet_pda(OTHER_USER_ID, &PROGRAM_ID).0;
@@ -834,7 +825,6 @@ fn program_so_path() -> &'static Path {
         let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let status = Command::new("cargo")
             .current_dir(&manifest_dir)
-            .env("DISCORD_PUBLIC_KEY", discord_signer().pubkey().to_string())
             .args([
                 "build-sbf",
                 "--manifest-path",

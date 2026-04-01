@@ -3,15 +3,20 @@ import {
   createKeyPairSignerFromBytes,
   getBase58Encoder,
   createSolanaRpc,
-  sendTransactionWithoutConfirmingFactory,
+  createSolanaRpcSubscriptions,
+  lamports,
+  sendAndConfirmTransactionFactory,
 } from "@solana/kit";
 
-import { createPollingRpcExecutor } from "./executor";
+import { createRpcExecutor } from "./executor";
+import { requiredDiscordPublicKey } from "./discord";
 import { vaultPda, walletStatePda } from "./program";
+import { deriveSubscriptionsUrl } from "./rpc";
 import type { BotConfig } from "./server";
 
 const TOKEN_PROGRAM_ID = address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const BASE58_ENCODER = getBase58Encoder();
+const AIRDROP_LAMPORTS = lamports(5_000_000_000n);
 
 export type BotRuntimeOptions = {
   rpcUrl: string;
@@ -23,7 +28,7 @@ export type BotRuntimeOptions = {
 
 export type BotRuntime = Pick<
   BotConfig,
-  "executor" | "relayer" | "programId" | "discordPublicKey" | "walletStateExists" | "walletSummary"
+  "executor" | "relayer" | "programId" | "discordPublicKey" | "walletStateExists" | "walletSummary" | "airdrop"
 > & {
   rpcUrl: string;
 };
@@ -31,34 +36,36 @@ export type BotRuntime = Pick<
 export async function createBotRuntime(
   options: BotRuntimeOptions,
 ): Promise<BotRuntime> {
-  void options.subscriptionsUrl;
   const rpc = createSolanaRpc(options.rpcUrl);
+  const rpcSubscriptions = createSolanaRpcSubscriptions(
+    options.subscriptionsUrl ?? deriveSubscriptionsUrl(options.rpcUrl),
+  );
   const relayer = await createKeyPairSignerFromBytes(
     BASE58_ENCODER.encode(options.relayerSecret),
   );
   const programAddress = address(options.programId);
-  const sendTransaction = sendTransactionWithoutConfirmingFactory({ rpc });
+  const discordPublicKey = requiredDiscordPublicKey({
+    DISCORD_PUBLIC_KEY: options.discordPublicKey,
+  });
+  const sendAndConfirmTransaction = sendAndConfirmTransactionFactory({
+    rpc,
+    rpcSubscriptions,
+  });
 
   return {
     rpcUrl: options.rpcUrl,
-    executor: createPollingRpcExecutor({
+    executor: createRpcExecutor({
       async getLatestBlockhash() {
         const { value } = await rpc.getLatestBlockhash().send();
         return value;
       },
-      async sendTransaction(transaction, config) {
-        await sendTransaction(transaction, config);
-      },
-      async getSignatureStatus(signature) {
-        const { value } = await rpc
-          .getSignatureStatuses([signature], { searchTransactionHistory: true })
-          .send();
-        return value[0] ?? null;
+      async sendAndConfirmTransaction(transaction, config) {
+        await sendAndConfirmTransaction(transaction, config);
       },
     }),
     relayer,
     programId: programAddress,
-    discordPublicKey: address(options.discordPublicKey),
+    discordPublicKey,
     async walletStateExists(discordUserId) {
       const walletState = await walletStatePda(programAddress, discordUserId);
       const { value } = await rpc.getAccountInfo(walletState, { encoding: "base64" }).send();
@@ -67,10 +74,6 @@ export async function createBotRuntime(
     async walletSummary(discordUserId) {
       const walletState = await walletStatePda(programAddress, discordUserId);
       const { value } = await rpc.getAccountInfo(walletState, { encoding: "base64" }).send();
-      if (value === null) {
-        return "error:wallet_not_initialized";
-      }
-
       const vault = await vaultPda(programAddress, walletState);
       const [{ value: solLamports }, { value: tokenAccounts }] = await Promise.all([
         rpc.getBalance(vault).send(),
@@ -96,7 +99,18 @@ export async function createBotRuntime(
       });
 
       const tokens = tokenLines.length > 0 ? tokenLines.join("\n") : "none";
-      return `vault: ${vault}\nsol: ${sol}\ntokens:\n${tokens}`;
+      const initialized = value !== null ? "yes" : "no";
+      return `vault: ${vault}\ninitialized: ${initialized}\nsol: ${sol}\ntokens:\n${tokens}`;
+    },
+    async airdrop(discordUserId) {
+      const walletState = await walletStatePda(programAddress, discordUserId);
+      const { value } = await rpc.getAccountInfo(walletState, { encoding: "base64" }).send();
+      if (value === null) {
+        throw new Error("wallet_not_initialized");
+      }
+
+      const vault = await vaultPda(programAddress, walletState);
+      return rpc.requestAirdrop(vault, AIRDROP_LAMPORTS).send();
     },
   };
 }

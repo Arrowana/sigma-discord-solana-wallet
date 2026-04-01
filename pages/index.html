@@ -242,6 +242,36 @@
         font: 500 0.82rem/1.5 "Space Grotesk", sans-serif;
       }
 
+      .receipt strong {
+        color: var(--text);
+      }
+
+      .receipt-link {
+        margin-top: 8px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: #9ec1ff;
+        text-decoration: none;
+        font-weight: 600;
+      }
+
+      .receipt-link:hover {
+        text-decoration: underline;
+      }
+
+      .solscan-badge {
+        width: 18px;
+        height: 18px;
+        border-radius: 999px;
+        display: inline-grid;
+        place-items: center;
+        background: linear-gradient(135deg, #9945ff, #14f195);
+        color: #091119;
+        font-size: 0.62rem;
+        font-weight: 700;
+      }
+
       .ledger-shell {
         padding: 13px;
         display: grid;
@@ -470,7 +500,6 @@
                   bot
                   roleColor="#67efb9"
                 >
-                  Bob's vault is live.
                   <div class="receipt">
                     vault: 9YQ...BobVault<br />
                     sol: 2.14<br />
@@ -499,12 +528,21 @@
                   bot
                   roleColor="#67efb9"
                 >
-                  Sent 25 USDC from Bob’s vault to Alice’s vault.
                   <div class="receipt">
-                    status: confirmed<br />
+                    <strong>success</strong><br />
                     mint: USDC<br />
                     from: Bob vault<br />
                     to: Alice vault
+                    <br />
+                    <a
+                      class="receipt-link"
+                      href="https://solscan.io/tx/placeholder"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <span class="solscan-badge">S</span>
+                      <span>View on Solscan</span>
+                    </a>
                   </div>
                 </discord-message>
               </discord-messages>

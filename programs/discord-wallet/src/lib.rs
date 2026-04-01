@@ -848,10 +848,11 @@ fn process_wallet_init(
     interaction: &ParsedInteraction,
     accounts: WalletInitAccounts<'_>,
 ) -> ProgramResult {
-    if !accounts.wallet_state.is_data_empty() || !accounts.vault.is_data_empty() {
+    if !accounts.wallet_state.is_data_empty() || !accounts.wallet_state.owned_by(&pinocchio_system::ID)
+    {
         return Err(ProgramError::AccountAlreadyInitialized);
     }
-    if accounts.wallet_state.lamports() != 0 || accounts.vault.lamports() != 0 {
+    if accounts.wallet_state.lamports() != 0 {
         return Err(ProgramError::AccountAlreadyInitialized);
     }
 
@@ -890,14 +891,22 @@ fn process_wallet_init(
     ];
     let vault_signer = Signer::from(&vault_signer_seeds);
 
-    CreateAccount::with_minimum_balance(
-        accounts.payer,
-        accounts.vault,
-        0,
-        &pinocchio_system::ID,
-        None,
-    )?
-    .invoke_signed(&[vault_signer])?;
+    if accounts.vault.lamports() == 0 {
+        if !accounts.vault.is_data_empty() || !accounts.vault.owned_by(&pinocchio_system::ID) {
+            return Err(ProgramError::AccountAlreadyInitialized);
+        }
+
+        CreateAccount::with_minimum_balance(
+            accounts.payer,
+            accounts.vault,
+            0,
+            &pinocchio_system::ID,
+            None,
+        )?
+        .invoke_signed(&[vault_signer])?;
+    } else if !accounts.vault.is_data_empty() || !accounts.vault.owned_by(&pinocchio_system::ID) {
+        return Err(ProgramError::AccountAlreadyInitialized);
+    }
 
     write_wallet_state(
         accounts.wallet_state,
@@ -995,19 +1004,13 @@ fn process_sol_transfer_user(
         verified_timestamp,
     )?;
 
-    let destination_wallet_state =
-        read_wallet_state(accounts.destination_wallet_state, program_id)?;
     let (expected_destination_wallet, _) = wallet_pda(destination_user_id, program_id);
     let (expected_destination_vault, _) =
-        vault_pda(accounts.destination_wallet_state.address(), program_id);
+        vault_pda(&expected_destination_wallet, program_id);
     if accounts.destination_wallet_state.address() != &expected_destination_wallet
         || accounts.destination_vault.address() != &expected_destination_vault
-        || destination_wallet_state.discord_user_id != destination_user_id
     {
         return Err(ProgramError::InvalidSeeds);
-    }
-    if !accounts.destination_vault.owned_by(&pinocchio_system::ID) {
-        return Err(ProgramError::InvalidAccountOwner);
     }
 
     let amount = parse_ui_amount_to_base_units(amount_ui, 9)?;
@@ -1086,15 +1089,11 @@ fn process_token_transfer_user(
         verified_timestamp,
     )?;
 
-    let destination_wallet_state =
-        read_wallet_state(accounts.destination_wallet_state, program_id)?;
     let (expected_destination_wallet, _) = wallet_pda(destination_user_id, program_id);
-    if accounts.destination_wallet_state.address() != &expected_destination_wallet
-        || destination_wallet_state.discord_user_id != destination_user_id
-    {
+    if accounts.destination_wallet_state.address() != &expected_destination_wallet {
         return Err(ProgramError::InvalidSeeds);
     }
-    let destination_vault = vault_pda(accounts.destination_wallet_state.address(), program_id).0;
+    let destination_vault = vault_pda(&expected_destination_wallet, program_id).0;
     let amount = validate_and_parse_token_transfer(
         accounts.source_vault.address(),
         accounts.mint,

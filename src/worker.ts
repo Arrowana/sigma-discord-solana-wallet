@@ -9,12 +9,9 @@ export type WorkerEnv = {
   DISCORD_PUBLIC_KEY: string;
 };
 
-let botHandlerPromise: Promise<(request: Request) => Promise<Response>> | undefined;
-
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
-    botHandlerPromise ??= createWorkerHandler(env);
-    const handler = await botHandlerPromise;
+    const handler = await createWorkerHandler(env);
     return handler(request);
   },
 };

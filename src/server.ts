@@ -5,7 +5,6 @@ import {
 } from "@solana/kit";
 
 import { utf8ByteLength } from "./bytes";
-import { DEFAULT_DISCORD_PUBLIC_KEY } from "./constants";
 import type { DiscordInteraction } from "./discord";
 import { verifyDiscordRequest } from "./discord";
 import type { TransactionExecutor } from "./executor";
@@ -15,10 +14,11 @@ export type BotConfig = {
   executor: TransactionExecutor;
   relayer: KeyPairSigner;
   programId: Address;
-  discordPublicKey?: Address;
+  discordPublicKey: Address;
   port?: number;
   walletStateExists?(discordUserId: string): Promise<boolean>;
   walletSummary?(discordUserId: string): Promise<string>;
+  airdrop?(discordUserId: string): Promise<string>;
 };
 
 export function createBotHandler(config: BotConfig) {
@@ -33,8 +33,7 @@ export function createBotHandler(config: BotConfig) {
     const rawBody = await request.text();
     const timestamp = request.headers.get("x-signature-timestamp");
     const signature = request.headers.get("x-signature-ed25519");
-    const discordPublicKey = config.discordPublicKey ?? DEFAULT_DISCORD_PUBLIC_KEY;
-    if (!(await verifyDiscordRequest(timestamp, signature, rawBody, discordPublicKey))) {
+    if (!(await verifyDiscordRequest(timestamp, signature, rawBody, config.discordPublicKey))) {
       return new Response("invalid signature", { status: 401 });
     }
 
@@ -53,6 +52,12 @@ export function createBotHandler(config: BotConfig) {
       if (interaction.data.name === "wallet" && config.walletSummary) {
         return responseMessage(
           await config.walletSummary(walletTargetUserId(interaction)),
+        );
+      }
+
+      if (interaction.data.name === "airdrop" && config.airdrop) {
+        return responseMessage(
+          `ok:airdrop:${await config.airdrop(interaction.member.user.id)}`,
         );
       }
 
@@ -78,7 +83,7 @@ export function createBotHandler(config: BotConfig) {
         programId: config.programId,
         relayer: config.relayer,
         latestBlockhash,
-        discordPublicKey,
+        discordPublicKey: config.discordPublicKey,
       });
 
       const signedTransaction = await signTransactionMessageWithSigners(transactionMessage);

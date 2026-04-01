@@ -1,112 +1,78 @@
-# Discord Solana Wallet Bot
+# sigma
 
-## Program E2E
+sigma is a Discord-native Solana wallet.
+
+The core trust assumption is simple: wallet actions only execute when the command was signed by the Discord app. The bot or relayer does not invent authority; it just forwards the request and pays fees.
+
+At a high level:
+
+- each Discord user gets a program-derived vault
+- Discord slash commands become on-chain instructions
+- SOL and token transfers can be initiated from Discord
+- a configured withdrawer can always exit funds on-chain
+
+It works only with surfpool for real Discord payloads, this project is designed to work with the `tx v1` support in [`Arrowana/surfpool`](https://github.com/Arrowana/surfpool/tree/chore/solana-4). The signed Discord raw body is typically around 1.7 kB, so carrying it atomically alongside Ed25519 verification is only possible with the larger `v1` transaction envelope. That avoids compromising the design by splitting verification away from execution.
+
+More info about larger TX [SIMD-0296](https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0296-larger-transactions.md)
+
+## How It Works
+
+1. A user issues a slash command in Discord.
+2. Discord signs the raw request.
+3. The relayer submits a Solana transaction carrying that signed payload.
+4. The program verifies the Discord signature, checks the wallet binding, and executes the action.
+
+## Main Pieces
+
+- On-chain program: [lib.rs](REDACTED/projects/experiments/discord-solana-wallet-bot/programs/discord-wallet/src/lib.rs)
+- Signature verification helper: [sigverify.rs](REDACTED/projects/experiments/discord-solana-wallet-bot/programs/discord-wallet/src/sigverify.rs)
+- Worker entrypoint: [worker.ts](REDACTED/projects/experiments/discord-solana-wallet-bot/src/worker.ts)
+- Landing page: [index.html](REDACTED/projects/experiments/discord-solana-wallet-bot/pages/index.html)
+
+## Test
+
+Run the program integration suite:
 
 ```bash
-bun run e2e
+bun run test
 ```
 
-This runs the Rust LiteSVM integration suite under [litesvm.rs](REDACTED/projects/experiments/discord-solana-wallet-bot/programs/discord-wallet/tests/litesvm.rs). The test:
+This uses LiteSVM and covers the main happy paths plus at least one signature failure path.
 
-- rebuilds the SBF program against the fixture Discord public key
-- loads the compiled program into LiteSVM with Ed25519 precompile support
-- verifies `wallet_init`
-- verifies `set_withdrawer`
-- verifies Discord-triggered SOL transfers to wallet addresses and mentioned users
-- verifies Discord-triggered SPL token transfers to owner ATAs and mentioned-user vault ATAs
-- verifies direct SOL and SPL token withdrawals by the configured withdrawer
+## Discord Flow
 
-## Real Discord E2E
-
-1. Build and deploy the program against the real Discord application public key:
+Build the program with the real Discord app public key:
 
 ```bash
 DISCORD_PUBLIC_KEY=<discord-app-public-key> cargo build-sbf --manifest-path programs/discord-wallet/Cargo.toml --features bpf-entrypoint
 ```
 
-2. Fill in `.env.example`.
-
-3. Start the Worker locally with Wrangler, usually:
-
-```bash
-bun run start
-```
-
-For a publicly reachable development URL, use `wrangler dev --remote` instead and set `PUBLIC_INTERACTIONS_URL` to that Worker URL.
-
-4. Run:
-
-```bash
-bun run real:e2e
-```
-
-The helper deploys `target/deploy/discord_wallet.so` to the configured localnet with `relayer-keypair.json`, updates the Discord interactions endpoint to `PUBLIC_INTERACTIONS_URL/interactions`, and overwrites the `wallet`, `wallet_init`, `set_withdrawer`, and `transfer` commands.
-
-For fast iteration in a test server, set `DISCORD_GUILD_ID`. That makes the sync use guild-scoped commands, which update immediately. Without it, the sync updates global commands, which can appear stale in the Discord client for a while.
-
-To run against the program already deployed on localnet:
-
-```bash
-bun run real:e2e -- --skip-deploy
-```
-
-If you only want the deploy step:
+Deploy the program
 
 ```bash
 bun run deploy:localnet
 ```
 
-Notes:
-
-- The live on-chain flow is guild-only.
-
-## Cloudflare Worker
-
-The Discord HTTP handler is also exposed as a Worker entry at [worker.ts](REDACTED/projects/experiments/discord-solana-wallet-bot/src/worker.ts), with config in [wrangler.jsonc](REDACTED/projects/experiments/discord-solana-wallet-bot/wrangler.jsonc).
-
-Set these Worker secrets or vars:
-
-- `RELAYER_SECRET_KEY`
-- `PROGRAM_ID`
-- `DISCORD_PUBLIC_KEY`
-- `SOLANA_RPC_URL`
-- `SOLANA_WS_URL` is optional and currently unused by the Worker path
-
-Then deploy with:
+Airdrop the relayer keypair then start the Worker locally:
 
 ```bash
-bunx wrangler deploy
+bun run start
 ```
 
-Or, if `wrangler` is installed already:
+For a publicly reachable dev URL, use `wrangler dev --remote` and set:
+
+- `PUBLIC_INTERACTIONS_URL`
+
+Then sync Discord and optionally deploy localnet state:
 
 ```bash
-bun run deploy:worker
+bun run real:e2e
 ```
 
-## Cloudflare Pages
-
-A standalone landing page for Cloudflare Pages lives at [index.html](REDACTED/projects/experiments/discord-solana-wallet-bot/pages/index.html).
-
-You can deploy that directory directly as a Pages project:
+Useful variants:
 
 ```bash
-pages/
+bun run real:e2e -- --skip-deploy
+bun run deploy:localnet
+bun run sync:discord
 ```
-
-## Local validator helper
-
-To boot a local validator with the compiled program preloaded at `PROGRAM_ID`, and to fund both the relayer and a generated test user:
-
-```bash
-./scripts/start-local-validator.sh
-```
-
-The script:
-
-- loads `target/deploy/discord_wallet.so` at the `PROGRAM_ID` from `.env`
-- reuses `relayer-keypair.json`
-- creates `test-user-keypair.json` if it does not exist
-- airdrops 10 SOL to the relayer and 10 SOL to the test user
-
-Leave that process running while you start the Worker with `bun run start`.

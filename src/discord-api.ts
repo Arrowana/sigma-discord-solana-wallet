@@ -118,6 +118,13 @@ function commandDefinitions() {
       ],
     },
     {
+      name: "airdrop",
+      description: "Airdrop 5 SOL to your vault on localnet",
+      type: 1,
+      integration_types,
+      contexts,
+    },
+    {
       name: "wallet_init",
       description: "Create your Discord-bound wallet",
       type: 1,
