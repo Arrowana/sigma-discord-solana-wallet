@@ -34,6 +34,7 @@ import {
   VAULT_SEED,
   WALLET_SEED,
 } from "./constants";
+import { hexToBytes, utf8Bytes } from "./bytes";
 import type { DiscordInteraction } from "./discord";
 
 const ADDRESS_ENCODER = getAddressEncoder();
@@ -88,8 +89,8 @@ export function encodeInteractionInstruction(
   timestamp: string,
   rawBody: string,
 ): Uint8Array {
-  const timestampBytes = Buffer.from(timestamp, "utf8");
-  const rawBodyBytes = Buffer.from(rawBody, "utf8");
+  const timestampBytes = utf8Bytes(timestamp);
+  const rawBodyBytes = utf8Bytes(rawBody);
   const verifiedMessageLen = timestampBytes.length + rawBodyBytes.length;
 
   const data = new Uint8Array(EXECUTE_HEADER_LEN + verifiedMessageLen);
@@ -412,30 +413,35 @@ function buildEd25519VerifyInstruction(params: {
   messageDataOffset: number;
   messageDataSize: number;
 }) {
-  const signature = Buffer.from(params.signatureHex, "hex");
+  const signature = hexToBytes(params.signatureHex);
   if (signature.length !== 64) {
     throw new Error("discord signature must be 64 bytes");
   }
 
-  const header = Buffer.alloc(16);
+  const header = new Uint8Array(16);
+  const headerView = new DataView(
+    header.buffer,
+    header.byteOffset,
+    header.byteLength,
+  );
   const signatureOffset = 16;
   const publicKeyOffset = signatureOffset + 64;
 
   header[0] = 1;
   header[1] = 0;
-  header.writeUInt16LE(signatureOffset, 2);
-  header.writeUInt16LE(0xffff, 4);
-  header.writeUInt16LE(publicKeyOffset, 6);
-  header.writeUInt16LE(0xffff, 8);
-  header.writeUInt16LE(params.messageDataOffset, 10);
-  header.writeUInt16LE(params.messageDataSize, 12);
-  header.writeUInt16LE(params.messageInstructionIndex, 14);
+  headerView.setUint16(2, signatureOffset, true);
+  headerView.setUint16(4, 0xffff, true);
+  headerView.setUint16(6, publicKeyOffset, true);
+  headerView.setUint16(8, 0xffff, true);
+  headerView.setUint16(10, params.messageDataOffset, true);
+  headerView.setUint16(12, params.messageDataSize, true);
+  headerView.setUint16(14, params.messageInstructionIndex, true);
   const publicKeyBytes = ADDRESS_ENCODER.encode(params.publicKey);
   const data = new Uint8Array(
     header.length + signature.length + publicKeyBytes.length,
   );
-  data.set(new Uint8Array(header), 0);
-  data.set(new Uint8Array(signature), header.length);
+  data.set(header, 0);
+  data.set(signature, header.length);
   data.set(publicKeyBytes, header.length + signature.length);
 
   return {

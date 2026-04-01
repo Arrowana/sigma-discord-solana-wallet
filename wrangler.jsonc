@@ -1,0 +1,7 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "discord-solana-wallet-bot",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-04-01",
+  "workers_dev": true
+}

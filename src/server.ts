@@ -4,14 +4,12 @@ import {
   type KeyPairSigner,
 } from "@solana/kit";
 
+import { utf8ByteLength } from "./bytes";
 import { DEFAULT_DISCORD_PUBLIC_KEY } from "./constants";
 import type { DiscordInteraction } from "./discord";
 import { verifyDiscordRequest } from "./discord";
 import type { TransactionExecutor } from "./executor";
 import { buildDiscordCommandTransaction } from "./program";
-
-const LAST_REQUEST_BODY_DUMP_PATH = "/tmp/discord-wallet-bot-last-request-body.json";
-const LAST_REQUEST_META_DUMP_PATH = "/tmp/discord-wallet-bot-last-request-meta.json";
 
 export type BotConfig = {
   executor: TransactionExecutor;
@@ -21,11 +19,6 @@ export type BotConfig = {
   port?: number;
   walletStateExists?(discordUserId: string): Promise<boolean>;
   walletSummary?(discordUserId: string): Promise<string>;
-};
-
-export type BotServer = {
-  url: string;
-  stop(): Promise<void>;
 };
 
 export function createBotHandler(config: BotConfig) {
@@ -40,9 +33,8 @@ export function createBotHandler(config: BotConfig) {
     const rawBody = await request.text();
     const timestamp = request.headers.get("x-signature-timestamp");
     const signature = request.headers.get("x-signature-ed25519");
-    await dumpDiscordRequest(rawBody, timestamp, signature);
     const discordPublicKey = config.discordPublicKey ?? DEFAULT_DISCORD_PUBLIC_KEY;
-    if (!verifyDiscordRequest(timestamp, signature, rawBody, discordPublicKey)) {
+    if (!(await verifyDiscordRequest(timestamp, signature, rawBody, discordPublicKey))) {
       return new Response("invalid signature", { status: 401 });
     }
 
@@ -67,7 +59,7 @@ export function createBotHandler(config: BotConfig) {
       if (
         interaction.data.name === "wallet_init" &&
         config.walletStateExists &&
-        await config.walletStateExists(interaction.member.user.id)
+        (await config.walletStateExists(interaction.member.user.id))
       ) {
         return Response.json({
           type: 4,
@@ -116,43 +108,6 @@ function walletTargetUserId(
   return interaction.member.user.id;
 }
 
-export function createBotServer(config: BotConfig): BotServer {
-  const handleRequest = createBotHandler(config);
-  const server = Bun.serve({
-    port: config.port ?? 3000,
-    fetch: handleRequest,
-  });
-
-  return {
-    url: server.url.toString(),
-    async stop() {
-      server.stop(true);
-    },
-  };
-}
-
-async function dumpDiscordRequest(
-  rawBody: string,
-  timestamp: string | null,
-  signature: string | null,
-) {
-  const verifiedMessageLength = Buffer.byteLength(timestamp ?? "", "utf8") + Buffer.byteLength(rawBody, "utf8");
-  await Bun.write(Bun.file(LAST_REQUEST_BODY_DUMP_PATH), rawBody);
-  await Bun.write(
-    Bun.file(LAST_REQUEST_META_DUMP_PATH),
-    JSON.stringify(
-      {
-        timestamp,
-        signature,
-        rawBodyLength: Buffer.byteLength(rawBody, "utf8"),
-        verifiedMessageLength,
-      },
-      null,
-      2,
-    ),
-  );
-}
-
 function responseMessage(content: string): Response {
   return Response.json({
     type: 4,
@@ -167,13 +122,12 @@ async function logInteractionFailure(
   timestamp: string | null,
   signature: string | null,
 ) {
-  const failureDump = await dumpFailedDiscordRequest({
-    interaction,
-    rawBody,
+  const requestMeta = {
     timestamp,
     signature,
-    error,
-  });
+    rawBodyLength: utf8ByteLength(rawBody),
+    verifiedMessageLength: utf8ByteLength(timestamp ?? "") + utf8ByteLength(rawBody),
+  };
   const lines = [
     "[discord-wallet] interaction execution failed",
     `command=${interaction.data.name}`,
@@ -182,10 +136,7 @@ async function logInteractionFailure(
     `message=${getErrorMessage(error)}`,
     `request_timestamp=${timestamp ?? ""}`,
     `request_signature=${signature ?? ""}`,
-    `request_body_path=${LAST_REQUEST_BODY_DUMP_PATH}`,
-    `request_meta_path=${LAST_REQUEST_META_DUMP_PATH}`,
-    `failure_body_path=${failureDump.bodyPath}`,
-    `failure_meta_path=${failureDump.metaPath}`,
+    `request_meta=${safeJson(requestMeta)}`,
     `raw_body=${rawBody}`,
   ];
 
@@ -207,42 +158,6 @@ async function logInteractionFailure(
   }
 
   console.error(lines.join("\n"));
-}
-
-async function dumpFailedDiscordRequest(params: {
-  interaction: Extract<DiscordInteraction, { type: 2 }>;
-  rawBody: string;
-  timestamp: string | null;
-  signature: string | null;
-  error: unknown;
-}) {
-  const safeInteractionId = params.interaction.id.replace(/[^0-9A-Za-z_-]/g, "_");
-  const bodyPath = `/tmp/discord-wallet-bot-failed-${safeInteractionId}-body.json`;
-  const metaPath = `/tmp/discord-wallet-bot-failed-${safeInteractionId}-meta.json`;
-  const verifiedMessageLength =
-    Buffer.byteLength(params.timestamp ?? "", "utf8") + Buffer.byteLength(params.rawBody, "utf8");
-
-  await Bun.write(Bun.file(bodyPath), params.rawBody);
-  await Bun.write(
-    Bun.file(metaPath),
-    safeJson(
-      {
-        interactionId: params.interaction.id,
-        command: params.interaction.data.name,
-        userId: params.interaction.member.user.id,
-        timestamp: params.timestamp,
-        signature: params.signature,
-        rawBodyLength: Buffer.byteLength(params.rawBody, "utf8"),
-        verifiedMessageLength,
-        errorMessage: getErrorMessage(params.error),
-        errorContext: getErrorContext(params.error),
-        errorCause: getErrorCause(params.error),
-      },
-      2,
-    ),
-  );
-
-  return { bodyPath, metaPath };
 }
 
 function getErrorMessage(error: unknown) {

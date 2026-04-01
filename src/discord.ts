@@ -1,9 +1,17 @@
-import nacl from "tweetnacl";
-import { getAddressEncoder, type Address } from "@solana/kit";
+import {
+  createKeyPairFromBytes,
+  getPublicKeyFromAddress,
+  signBytes,
+  signatureBytes,
+  type Address,
+  verifySignature,
+} from "@solana/kit";
 
+import { bytesToHex, hexToBytes, utf8Bytes } from "./bytes";
 import { DEFAULT_DISCORD_PUBLIC_KEY, DISCORD_SECRET_KEY_BYTES } from "./constants";
 
-const ADDRESS_ENCODER = getAddressEncoder();
+let discordSigningKeyPairPromise: Promise<CryptoKeyPair> | undefined;
+const verificationKeyCache = new Map<Address, Promise<CryptoKey>>();
 
 export type DiscordInteraction =
   | {
@@ -23,42 +31,67 @@ export type DiscordInteraction =
       };
     };
 
-export function signDiscordRequest(
+export async function signDiscordRequest(
   timestamp: string,
   rawBody: string,
   secretKey: Uint8Array = DISCORD_SECRET_KEY_BYTES,
-): string {
-  const message = new TextEncoder().encode(timestamp + rawBody);
-  const signature = nacl.sign.detached(message, secretKey);
-  return Buffer.from(signature).toString("hex");
+): Promise<string> {
+  const message = utf8Bytes(timestamp + rawBody);
+  const signature = await signBytes(
+    await getDiscordPrivateKey(secretKey),
+    message,
+  );
+  return bytesToHex(signature);
 }
 
-export function verifyDiscordRequest(
+export async function verifyDiscordRequest(
   timestamp: string | null,
   signatureHex: string | null,
   rawBody: string,
   publicKey: Address = DEFAULT_DISCORD_PUBLIC_KEY,
-): boolean {
+): Promise<boolean> {
   if (!timestamp || !signatureHex) {
     return false;
   }
-  const message = new TextEncoder().encode(timestamp + rawBody);
-  const signature = new Uint8Array(Buffer.from(signatureHex, "hex"));
-  return nacl.sign.detached.verify(
-    message,
+  const message = utf8Bytes(timestamp + rawBody);
+  const signature = signatureBytes(hexToBytes(signatureHex));
+  return verifySignature(
+    await getVerificationKey(publicKey),
     signature,
-    new Uint8Array(ADDRESS_ENCODER.encode(publicKey)),
+    message,
   );
 }
 
-export function discordHeaders(
+export async function discordHeaders(
   timestamp: string,
   rawBody: string,
   secretKey: Uint8Array = DISCORD_SECRET_KEY_BYTES,
-): Headers {
+): Promise<Headers> {
   const headers = new Headers();
   headers.set("content-type", "application/json");
   headers.set("x-signature-timestamp", timestamp);
-  headers.set("x-signature-ed25519", signDiscordRequest(timestamp, rawBody, secretKey));
+  headers.set(
+    "x-signature-ed25519",
+    await signDiscordRequest(timestamp, rawBody, secretKey),
+  );
   return headers;
+}
+
+async function getDiscordPrivateKey(secretKey: Uint8Array): Promise<CryptoKey> {
+  if (secretKey === DISCORD_SECRET_KEY_BYTES) {
+    discordSigningKeyPairPromise ??= createKeyPairFromBytes(secretKey);
+    const { privateKey } = await discordSigningKeyPairPromise;
+    return privateKey;
+  }
+  const { privateKey } = await createKeyPairFromBytes(secretKey);
+  return privateKey;
+}
+
+function getVerificationKey(publicKey: Address): Promise<CryptoKey> {
+  let cached = verificationKeyCache.get(publicKey);
+  if (!cached) {
+    cached = getPublicKeyFromAddress(publicKey);
+    verificationKeyCache.set(publicKey, cached);
+  }
+  return cached;
 }

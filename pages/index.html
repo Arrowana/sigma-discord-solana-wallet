@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>sigma</title>
+    <meta
+      name="description"
+      content="sigma is a Discord-native Solana wallet demo where Bob initializes a vault and sends USDC to Alice."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #0a0f17;
+        --panel: rgba(20, 26, 39, 0.82);
+        --panel-strong: rgba(16, 21, 32, 0.96);
+        --line: rgba(255, 255, 255, 0.08);
+        --text: #eef5ff;
+        --muted: #9aa7c2;
+        --accent: #67efb9;
+        --accent-2: #6797ff;
+        --shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: "Space Grotesk", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 20% 15%, rgba(103, 151, 255, 0.2), transparent 24%),
+          radial-gradient(circle at 82% 8%, rgba(103, 239, 185, 0.18), transparent 22%),
+          linear-gradient(180deg, #080c13 0%, var(--bg) 100%);
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        background-size: 36px 36px;
+        mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.85), transparent 85%);
+      }
+
+      .page {
+        width: min(1080px, calc(100vw - 28px));
+        padding: 32px 0 48px;
+      }
+
+      .intro {
+        text-align: center;
+        margin: 0 auto 16px;
+        max-width: 760px;
+      }
+
+      .name {
+        margin: 0;
+        font-family: "Fraunces", serif;
+        font-size: clamp(3rem, 8vw, 5.6rem);
+        line-height: 0.92;
+        letter-spacing: -0.08em;
+      }
+
+      .eyebrow {
+        margin-bottom: 10px;
+        color: var(--muted);
+        font-size: 0.76rem;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+      }
+
+      .pitch {
+        margin: 14px auto 0;
+        max-width: 42rem;
+        color: var(--muted);
+        font-size: 1rem;
+        line-height: 1.68;
+      }
+
+      .pitch strong {
+        color: var(--text);
+      }
+
+      .demo {
+        margin: 0 auto;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 30px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(16px);
+      }
+
+      .demo-head {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 6px 14px;
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+
+      .actions {
+        margin-top: 14px;
+        display: inline-flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+
+      .actions a {
+        text-decoration: none;
+        padding: 10px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.04);
+        color: var(--text);
+        font-size: 0.9rem;
+        font-weight: 600;
+      }
+
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: var(--accent);
+        box-shadow: 0 0 0 7px rgba(103, 239, 185, 0.12);
+      }
+
+      .demo-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+        gap: 14px;
+      }
+
+      .chat-shell,
+      .ledger-shell {
+        border-radius: 24px;
+        border: 1px solid var(--line);
+        overflow: hidden;
+        background: var(--panel-strong);
+      }
+
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 11px 14px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .server {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 600;
+      }
+
+      .server-mark {
+        width: 28px;
+        height: 28px;
+        border-radius: 10px;
+        background: linear-gradient(135deg, var(--accent-2), var(--accent));
+      }
+
+      .tiny {
+        color: var(--muted);
+        font-size: 0.8rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .chat-wrap {
+        padding: 12px 14px;
+        background: #313338;
+      }
+
+      discord-messages {
+        --discord-background-color: #313338;
+        --discord-text-color: #dbdee1;
+        --discord-secondary-background-color: #2b2d31;
+      }
+
+      .msg {
+        opacity: 0;
+        transform: translateY(14px);
+        filter: blur(4px);
+        transition: opacity 460ms ease, transform 460ms ease, filter 460ms ease;
+      }
+
+      .msg.show {
+        opacity: 1;
+        transform: translateY(0);
+        filter: blur(0);
+      }
+
+      .slash {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 2px;
+        padding: 7px 11px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.07);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: #ffffff;
+        font: 600 0.88rem/1.2 "Space Grotesk", sans-serif;
+      }
+
+      .slash .token {
+        color: #9ec1ff;
+      }
+
+      .slash .arg {
+        color: #67efb9;
+      }
+
+      .receipt {
+        margin-top: 8px;
+        padding: 8px 10px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.05);
+        color: #c8d2e6;
+        font: 500 0.82rem/1.5 "Space Grotesk", sans-serif;
+      }
+
+      .ledger-shell {
+        padding: 13px;
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+
+      .ledger-title {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.82rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      .card {
+        padding: 14px;
+        border-radius: 20px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .card-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 10px;
+      }
+
+      .card-name {
+        font-weight: 700;
+      }
+
+      .pill {
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+
+      .metric {
+        display: grid;
+        gap: 4px;
+        margin-top: 10px;
+      }
+
+      .metric span {
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+
+      .metric strong {
+        font-size: 1.04rem;
+        letter-spacing: -0.04em;
+      }
+
+      .meter {
+        margin-top: 8px;
+        height: 7px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .meter-fill {
+        height: 100%;
+        width: var(--fill, 0%);
+        background: linear-gradient(90deg, var(--accent-2), var(--accent));
+        transition: width 700ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+
+      .note {
+        margin-top: 14px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      [data-stage="0"] .stage-0,
+      [data-stage="1"] .stage-1,
+      [data-stage="2"] .stage-2,
+      [data-stage="3"] .stage-3 {
+        opacity: 1;
+      }
+
+      [data-stage="1"] .bob-pill,
+      [data-stage="2"] .bob-pill,
+      [data-stage="3"] .bob-pill,
+      [data-stage="3"] .alice-pill {
+        background: var(--accent);
+        color: #071018;
+      }
+
+      @media (max-width: 920px) {
+        .demo-layout {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+    <script type="module">
+      import "https://cdn.jsdelivr.net/npm/@skyra/discord-components-core@4.0.2/+esm";
+
+      const stages = [
+        {
+          status: "Bob checks his sigma vault.",
+          bobSol: "2.14 SOL",
+          bobUsdc: "140.00 USDC",
+          bobFill: "78%",
+          aliceSol: "0.42 SOL",
+          aliceUsdc: "0.00 USDC",
+          aliceFill: "4%",
+        },
+        {
+          status: "sigma shows Bob's live balances in-channel.",
+          bobSol: "2.14 SOL",
+          bobUsdc: "140.00 USDC",
+          bobFill: "78%",
+          aliceSol: "0.42 SOL",
+          aliceUsdc: "0.00 USDC",
+          aliceFill: "4%",
+        },
+        {
+          status: "Bob sends 25 USDC to @Alice from the channel.",
+          bobSol: "2.14 SOL",
+          bobUsdc: "140.00 USDC",
+          bobFill: "78%",
+          aliceSol: "0.42 SOL",
+          aliceUsdc: "0.00 USDC",
+          aliceFill: "4%",
+        },
+        {
+          status: "Alice receives the transfer in her sigma vault.",
+          bobSol: "2.14 SOL",
+          bobUsdc: "115.00 USDC",
+          bobFill: "64%",
+          aliceSol: "0.42 SOL",
+          aliceUsdc: "25.00 USDC",
+          aliceFill: "24%",
+        },
+      ];
+
+      const root = document.documentElement;
+      const statusText = document.querySelector("[data-status-text]");
+      const bobSol = document.querySelector("[data-bob-sol]");
+      const bobUsdc = document.querySelector("[data-bob-usdc]");
+      const bobFill = document.querySelector("[data-bob-fill]");
+      const aliceSol = document.querySelector("[data-alice-sol]");
+      const aliceUsdc = document.querySelector("[data-alice-usdc]");
+      const aliceFill = document.querySelector("[data-alice-fill]");
+      const messages = [...document.querySelectorAll(".msg")];
+
+      let stage = 0;
+
+      function render(nextStage) {
+        root.dataset.stage = String(nextStage);
+        const current = stages[nextStage];
+        statusText.textContent = current.status;
+        bobSol.textContent = current.bobSol;
+        bobUsdc.textContent = current.bobUsdc;
+        bobFill.style.setProperty("--fill", current.bobFill);
+        aliceSol.textContent = current.aliceSol;
+        aliceUsdc.textContent = current.aliceUsdc;
+        aliceFill.style.setProperty("--fill", current.aliceFill);
+        messages.forEach((message, index) => {
+          message.classList.toggle("show", index <= nextStage);
+        });
+      }
+
+      render(stage);
+      setInterval(() => {
+        stage = (stage + 1) % stages.length;
+        render(stage);
+      }, 2400);
+    </script>
+  </head>
+  <body data-stage="0">
+    <main class="page">
+      <section class="intro">
+        <div class="eyebrow">Discord-native Solana wallet</div>
+        <h1 class="name">sigma</h1>
+        <p class="pitch">
+          <strong>Trust the Discord app key, not the bot.</strong> sigma executes
+          wallet actions only when the command was signed by the Discord app,
+          while the relayer just forwards the request and pays fees.
+        </p>
+        <div class="actions">
+          <a href="https://github.com/placeholder/sigma" target="_blank" rel="noreferrer">GitHub</a>
+        </div>
+      </section>
+
+      <section class="demo">
+        <div class="demo-head">
+          <span class="status-dot"></span>
+          <span data-status-text>Bob checks his sigma vault.</span>
+        </div>
+
+        <div class="demo-layout">
+          <div class="chat-shell">
+            <div class="topbar">
+              <div class="server">
+                <span class="server-mark"></span>
+                <span>ops-treasury / #wallets</span>
+              </div>
+              <span class="tiny">Sim</span>
+            </div>
+
+            <div class="chat-wrap">
+              <discord-messages>
+                <discord-message
+                  class="msg stage-0"
+                  author="Bob"
+                  avatar="blue"
+                  roleColor="#9ec1ff"
+                >
+                  <div class="slash">
+                    <span class="token">/wallet</span>
+                  </div>
+                </discord-message>
+
+                <discord-message
+                  class="msg stage-1"
+                  author="sigma"
+                  avatar="green"
+                  bot
+                  roleColor="#67efb9"
+                >
+                  Bob's vault is live.
+                  <div class="receipt">
+                    vault: 9YQ...BobVault<br />
+                    sol: 2.14<br />
+                    usdc: 140.00
+                  </div>
+                </discord-message>
+
+                <discord-message
+                  class="msg stage-2"
+                  author="Bob"
+                  avatar="blue"
+                  roleColor="#9ec1ff"
+                >
+                  <div class="slash">
+                    <span class="token">/transfer</span>
+                    <span class="arg">tkn: usdc</span>
+                    <span class="arg">amt: 25</span>
+                    <span class="arg">to: <discord-mention>Alice</discord-mention></span>
+                  </div>
+                </discord-message>
+
+                <discord-message
+                  class="msg stage-3"
+                  author="sigma"
+                  avatar="green"
+                  bot
+                  roleColor="#67efb9"
+                >
+                  Sent 25 USDC from Bob’s vault to Alice’s vault.
+                  <div class="receipt">
+                    status: confirmed<br />
+                    mint: USDC<br />
+                    from: Bob vault<br />
+                    to: Alice vault
+                  </div>
+                </discord-message>
+              </discord-messages>
+            </div>
+          </div>
+
+          <aside class="ledger-shell">
+            <p class="ledger-title">Vault state</p>
+
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <div class="card-name">Bob</div>
+                  <div class="tiny">source vault</div>
+                </div>
+                <div class="pill bob-pill">live</div>
+              </div>
+              <div class="metric">
+                <span>SOL</span>
+                <strong data-bob-sol>2.14 SOL</strong>
+              </div>
+              <div class="metric">
+                <span>USDC</span>
+                <strong data-bob-usdc>0.00 USDC</strong>
+              </div>
+              <div class="meter"><div class="meter-fill" data-bob-fill style="--fill: 18%"></div></div>
+            </div>
+
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <div class="card-name">Alice</div>
+                  <div class="tiny">recipient vault</div>
+                </div>
+                <div class="pill alice-pill">live</div>
+              </div>
+              <div class="metric">
+                <span>SOL</span>
+                <strong data-alice-sol>0.42 SOL</strong>
+              </div>
+              <div class="metric">
+                <span>USDC</span>
+                <strong data-alice-usdc>0.00 USDC</strong>
+              </div>
+              <div class="meter"><div class="meter-fill" data-alice-fill style="--fill: 4%"></div></div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <p class="note">
+        Simulated Discord UI powered by
+        <a href="https://github.com/skyra-project/discord-components" target="_blank" rel="noreferrer">
+          Skyra Discord Components
+        </a>.
+      </p>
+    </main>
+  </body>
+</html>

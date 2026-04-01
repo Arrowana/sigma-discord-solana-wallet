@@ -4,19 +4,19 @@
   "type": "module",
   "scripts": {
     "deploy:localnet": "./scripts/deploy-localnet-program.sh",
+    "deploy:worker": "wrangler deploy",
     "e2e": "cargo test -p discord-wallet --test litesvm -- --nocapture",
     "real:e2e": "bun run src/real-e2e.ts",
-    "start": "bun run src/index.ts",
+    "start": "wrangler dev",
     "sync:discord": "bun run src/sync-discord.ts",
-    "tunnel": "bun run src/tunnel.ts"
+    "tunnel": "bun run src/tunnel.ts",
+    "worker:dev": "wrangler dev"
   },
   "dependencies": {
     "@solana-program/system": "^0.12.0",
     "@solana-program/token": "^0.7.0",
     "@solana/kit": "^6.5.0",
-    "@solana/sysvars": "^6.5.0",
-    "bs58": "^6.0.0",
-    "tweetnacl": "^1.0.3"
+    "@solana/sysvars": "^6.5.0"
   },
   "devDependencies": {
     "bun-types": "^1.3.11"

@@ -6,6 +6,7 @@ import {
   type Transaction,
 } from "@solana/kit";
 
+import { sleep } from "./bytes";
 import { assertTransactionSize } from "./program";
 
 export type TransactionExecution = {
@@ -111,7 +112,7 @@ async function waitForConfirmation(params: {
         return;
       }
     }
-    await Bun.sleep(params.pollIntervalMs);
+    await sleep(params.pollIntervalMs);
   }
 
   throw new Error(
