@@ -16,6 +16,7 @@ pinocchio = { version = "0.10", features = ["cpi"] }
 pinocchio-system = "0.5"
 pinocchio-token = "0.5"
 solana-address = { version = "2", features = ["curve25519", "decode"] }
+solana-instruction = { version = "3", features = ["syscalls"] }
 solana-program-log = "1.1.0"
 solana-sdk-ids = "3"
 

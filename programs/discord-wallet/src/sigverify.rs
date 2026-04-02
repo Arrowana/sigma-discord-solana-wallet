@@ -2,6 +2,7 @@ use pinocchio::{
     account::Ref, error::ProgramError, sysvars::instructions::Instructions, AccountView, Address,
     ProgramResult,
 };
+use solana_instruction::{syscalls::get_stack_height, TRANSACTION_LEVEL_STACK_HEIGHT};
 use solana_sdk_ids::ed25519_program;
 
 const ED25519_SIGNATURE_OFFSETS_START: usize = 2;
@@ -162,6 +163,11 @@ pub(crate) fn verify_ed25519(
     execute_header_len: usize,
     verified_message_len: usize,
 ) -> ProgramResult {
+    if get_stack_height() != TRANSACTION_LEVEL_STACK_HEIGHT {
+        return Err(crate::invalid_instruction(
+            "instruction must execute at transaction stack height",
+        ));
+    }
     let instructions = Instructions::try_from(instructions_sysvar)?;
     let verification = Ed25519Verification::inspect(&instructions, current_instruction_data, -1)?;
 
