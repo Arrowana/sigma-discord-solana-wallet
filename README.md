@@ -15,7 +15,7 @@ At a high level:
 - SOL and token transfers can be initiated from Discord
 - a configured withdrawer can always exit funds on-chain
 
-It works only with surfpool for real Discord payloads, this project is designed to work with the `tx v1` support in [`Arrowana/surfpool`](https://github.com/Arrowana/surfpool/tree/chore/solana-4). The signed Discord raw body is typically around 1.7 kB, so carrying it atomically alongside Ed25519 verification is only possible with the larger `v1` transaction envelope. That avoids compromising the design by splitting verification away from execution.
+It requires Surfpool 1.5+ for real Discord payloads. The signed Discord raw body is typically around 1.7 kB, so carrying it atomically alongside Ed25519 verification uses the larger `v1` transaction envelope. That avoids compromising the design by splitting verification away from execution. The included `surfpool` script always pulls the latest official `surfpool/surfpool` Docker image.
 
 More info about larger TX [SIMD-0296](https://github.com/solana-foundation/solana-improvement-documents/blob/main/proposals/0296-larger-transactions.md)
 
@@ -39,6 +39,8 @@ Run the program integration suite:
 
 ```bash
 bun run test
+bun run test:ts
+bun run typecheck
 ```
 
 This uses LiteSVM and covers the main happy paths plus at least one signature failure path.
@@ -51,7 +53,13 @@ Build the program with the real Discord app public key:
 DISCORD_PUBLIC_KEY=<discord-app-public-key> cargo build-sbf --manifest-path programs/discord-wallet/Cargo.toml --features bpf-entrypoint
 ```
 
-Deploy the program
+Start the latest official Surfpool Docker image:
+
+```bash
+bun run surfpool
+```
+
+Deploy the program from another terminal:
 
 ```bash
 bun run deploy:localnet
@@ -60,7 +68,7 @@ bun run deploy:localnet
 Airdrop the relayer keypair then start the Worker locally:
 
 ```bash
-bun run start
+bun run dev
 ```
 
 For a publicly reachable dev URL, use `wrangler dev --remote` and set:
@@ -80,3 +88,21 @@ bun run real:e2e -- --skip-deploy
 bun run deploy:localnet
 bun run sync:discord
 ```
+
+## Tokens by symbol
+
+Token symbols are display labels, not identities: any mint can claim `USDC`, and symbols can collide. The `/transfer` token field therefore uses Discord autocomplete to show a symbol, name, and full mint, while Discord submits and signs the exact mint address as the option value. The on-chain program accepts only `SOL` or a mint address and validates the mint plus both associated token accounts. A relayer cannot swap the mint after Discord signs the command.
+
+The default autocomplete registry contains mainnet USDC, USDT, and JUP. Replace it with `TOKEN_REGISTRY_JSON` when needed:
+
+```json
+[
+  {
+    "symbol": "USDC",
+    "name": "USD Coin",
+    "mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+  }
+]
+```
+
+Duplicate symbols are allowed and shown with distinct mints; duplicate mint entries and the reserved `SOL` symbol are rejected. Raw mint addresses remain supported. The current transfer path targets the original SPL Token program only; Token-2022 mints require a separate program-aware account path before they should be added to the registry.

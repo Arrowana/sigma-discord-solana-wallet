@@ -114,12 +114,12 @@ impl<'a> Ed25519Verification<'a> {
         })
     }
 
-    fn get_sigverify_slice<'b>(
-        sigverify_data: &'b [u8],
+    fn get_sigverify_slice(
+        sigverify_data: &[u8],
         instruction_index: u16,
         offset_start: u16,
         size: usize,
-    ) -> Result<&'b [u8], ProgramError> {
+    ) -> Result<&[u8], ProgramError> {
         if instruction_index != u16::MAX {
             return Err(crate::invalid_instruction(
                 "ed25519 signature/pubkey must be embedded in verify instruction",
@@ -134,13 +134,13 @@ impl<'a> Ed25519Verification<'a> {
             .ok_or_else(|| crate::invalid_instruction("ed25519 slice out of bounds"))
     }
 
-    fn get_current_instruction_slice<'b>(
-        current_instruction_data: &'b [u8],
+    fn get_current_instruction_slice(
+        current_instruction_data: &[u8],
         instruction_index: u16,
         current_index: u16,
         offset_start: u16,
         size: usize,
-    ) -> Result<&'b [u8], ProgramError> {
+    ) -> Result<&[u8], ProgramError> {
         if instruction_index != current_index {
             return Err(crate::invalid_instruction(
                 "ed25519 referenced unsupported instruction index",

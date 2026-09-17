@@ -42,6 +42,8 @@ const DISCORD_SECRET_KEY_BYTES: [u8; 64] = [
     74, 76,
 ];
 
+type TestTransactionResult = Result<(), Box<FailedTransactionMetadata>>;
+
 #[test]
 fn wallet_init_set_withdrawer_and_withdraw_sol_work() {
     let mut svm = new_svm();
@@ -477,7 +479,7 @@ fn execute_discord_command(
     user_id: u64,
     name: &str,
     options: &[(&str, &str)],
-) -> Result<(), FailedTransactionMetadata> {
+) -> TestTransactionResult {
     execute_discord_command_with_signature(
         svm,
         relayer,
@@ -497,7 +499,7 @@ fn execute_discord_command_with_signature(
     name: &str,
     options: &[(&str, &str)],
     signature_signer: &Keypair,
-) -> Result<(), FailedTransactionMetadata> {
+) -> TestTransactionResult {
     let timestamp = svm.get_sysvar::<Clock>().unix_timestamp.to_string();
     let raw_body = raw_body(interaction_id, user_id, name, options);
     let instruction_data = encode_execute_instruction(
@@ -549,14 +551,14 @@ fn send_tx(
     svm: &mut LiteSVM,
     signer: &Keypair,
     instructions: &[Instruction],
-) -> Result<(), FailedTransactionMetadata> {
+) -> TestTransactionResult {
     let tx = Transaction::new_signed_with_payer(
         instructions,
         Some(&signer.pubkey()),
         &[signer],
         svm.latest_blockhash(),
     );
-    svm.send_transaction(tx).map(|_| ())
+    svm.send_transaction(tx).map(|_| ()).map_err(Box::new)
 }
 
 fn withdraw_sol_instruction(

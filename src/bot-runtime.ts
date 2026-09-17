@@ -13,6 +13,7 @@ import { requiredDiscordPublicKey } from "./discord";
 import { vaultPda, walletStatePda } from "./program";
 import { deriveSubscriptionsUrl } from "./rpc";
 import type { BotConfig } from "./server";
+import { createTokenRegistry } from "./token-registry";
 
 const TOKEN_PROGRAM_ID = address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const BASE58_ENCODER = getBase58Encoder();
@@ -24,11 +25,13 @@ export type BotRuntimeOptions = {
   relayerSecret: string;
   programId: string;
   discordPublicKey: string;
+  tokenRegistryJson?: string;
 };
 
 export type BotRuntime = Pick<
   BotConfig,
   "executor" | "relayer" | "programId" | "discordPublicKey" | "walletStateExists" | "walletSummary" | "airdrop"
+  | "tokenRegistry"
 > & {
   rpcUrl: string;
 };
@@ -47,6 +50,8 @@ export async function createBotRuntime(
   const discordPublicKey = requiredDiscordPublicKey({
     DISCORD_PUBLIC_KEY: options.discordPublicKey,
   });
+  const tokenRegistry = createTokenRegistry(options.tokenRegistryJson);
+  const tokenRegistryByMint = new Map(tokenRegistry.map((entry) => [entry.mint, entry]));
   const sendAndConfirmTransaction = sendAndConfirmTransactionFactory({
     rpc,
     rpcSubscriptions,
@@ -66,6 +71,7 @@ export async function createBotRuntime(
     relayer,
     programId: programAddress,
     discordPublicKey,
+    tokenRegistry,
     async walletStateExists(discordUserId) {
       const walletState = await walletStatePda(programAddress, discordUserId);
       const { value } = await rpc.getAccountInfo(walletState, { encoding: "base64" }).send();
@@ -89,13 +95,17 @@ export async function createBotRuntime(
       const tokenLines = tokenAccounts.map((entry) => {
         const info = entry.account.data.parsed.info;
         const mint = info.mint;
+        const registeredToken = tokenRegistryByMint.get(mint);
         const tokenAmount = info.tokenAmount;
         const uiAmount =
           tokenAmount.uiAmountString ??
           (tokenAmount.uiAmount !== null && tokenAmount.uiAmount !== undefined
             ? String(tokenAmount.uiAmount)
             : tokenAmount.amount);
-        return `${mint}: ${uiAmount}`;
+        const tokenLabel = registeredToken
+          ? `${registeredToken.symbol} (${mint})`
+          : mint;
+        return `${tokenLabel}: ${uiAmount}`;
       });
 
       const tokens = tokenLines.length > 0 ? tokenLines.join("\n") : "none";
@@ -122,6 +132,7 @@ export function requiredRuntimeOptions(source: Record<string, string | undefined
     relayerSecret: requiredValue(source, "RELAYER_SECRET_KEY"),
     programId: requiredValue(source, "PROGRAM_ID"),
     discordPublicKey: requiredValue(source, "DISCORD_PUBLIC_KEY"),
+    tokenRegistryJson: source.TOKEN_REGISTRY_JSON,
   };
 }
 

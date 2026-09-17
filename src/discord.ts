@@ -31,9 +31,27 @@ export type DiscordInteraction =
       };
       data: {
         name: "wallet" | "airdrop" | "wallet_init" | "set_withdrawer" | "transfer";
-        options?: Array<{ name: string; value: string | number }>;
+        options?: DiscordCommandOption[];
+      };
+    }
+  | {
+      id: string;
+      type: 4;
+      guild_id?: string;
+      member?: {
+        user: { id: string; username?: string };
+      };
+      data: {
+        name: "transfer";
+        options?: DiscordCommandOption[];
       };
     };
+
+export type DiscordCommandOption = {
+  name: string;
+  value: string | number;
+  focused?: boolean;
+};
 
 export async function signDiscordRequest(
   timestamp: string,

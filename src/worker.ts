@@ -7,6 +7,7 @@ export type WorkerEnv = {
   RELAYER_SECRET_KEY: string;
   PROGRAM_ID: string;
   DISCORD_PUBLIC_KEY: string;
+  TOKEN_REGISTRY_JSON?: string;
 };
 
 export default {

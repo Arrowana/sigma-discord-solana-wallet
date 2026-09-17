@@ -5,20 +5,24 @@
   "scripts": {
     "deploy:localnet": "./scripts/deploy-localnet-program.sh",
     "deploy:worker": "wrangler deploy",
+    "surfpool": "docker run --pull=always --rm -p 8899:8899 -p 8900:8900 -p 18488:18488 surfpool/surfpool:latest",
     "test": "cargo test",
+    "test:ts": "bun test",
+    "typecheck": "tsc --noEmit",
     "real:e2e": "bun run src/real-e2e.ts",
     "dev": "wrangler dev",
     "sync:discord": "bun run src/sync-discord.ts",
     "tunnel": "bun run src/tunnel.ts"
   },
   "dependencies": {
-    "@solana-program/system": "^0.12.0",
-    "@solana-program/token": "^0.7.0",
-    "@solana/kit": "^6.5.0",
-    "@solana/sysvars": "^6.5.0",
-    "wrangler": "^4.79.0"
+    "@solana-program/system": "^0.14.1",
+    "@solana-program/token": "^0.16.1",
+    "@solana/kit": "^8.3.0",
+    "@solana/sysvars": "^8.3.0",
+    "wrangler": "^4.133.0"
   },
   "devDependencies": {
-    "bun-types": "^1.3.11"
+    "bun-types": "^1.4.2",
+    "typescript": "^7.0.2"
   }
 }

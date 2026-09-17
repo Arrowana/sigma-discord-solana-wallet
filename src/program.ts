@@ -65,9 +65,6 @@ const ED25519_HEADER_ENCODER = getStructEncoder([
   ["messageDataSize", U16_ENCODER],
   ["messageInstructionIndex", U16_ENCODER],
 ]);
-const USDC_MINT = address("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
-const USDT_MINT = address("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB");
-const JUP_MINT = address("JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN");
 
 export async function walletStatePda(
   programId: Address,
@@ -403,16 +400,10 @@ function parseAddress(value: string, errorMessage: string): Address {
 }
 
 function parseTokenMint(value: string): Address {
-  if (value.toLowerCase() === "usdc") {
-    return USDC_MINT;
-  }
-  if (value.toLowerCase() === "usdt") {
-    return USDT_MINT;
-  }
-  if (value.toLowerCase() === "jup") {
-    return JUP_MINT;
-  }
-  return parseAddress(value, "unsupported token symbol");
+  return parseAddress(
+    value,
+    "token must be SOL or a mint address; choose symbols from autocomplete",
+  );
 }
 
 function parseDiscordMention(value: string): string | null {
@@ -421,8 +412,6 @@ function parseDiscordMention(value: string): string | null {
 }
 
 function createV1TransactionMessage() {
-  // Kit compiles v1 transactions at runtime, but its public constructor type still excludes `1`.
-  // @ts-expect-error v1 creation is supported at runtime but not yet exposed in the TS signature.
   return createTransactionMessage({ version: 1 });
 }
 

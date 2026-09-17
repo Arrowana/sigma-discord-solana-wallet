@@ -11,7 +11,7 @@ use pinocchio::{
 use pinocchio_system::instructions::{CreateAccount, Transfer};
 use pinocchio_token::{
     instructions::TransferChecked as TokenTransferChecked,
-    state::{Mint, TokenAccount},
+    state::{Account as TokenAccount, Mint},
 };
 use solana_program_log::log;
 
@@ -23,7 +23,7 @@ mod entrypoint {
 
     pub fn process_instruction(
         program_id: &Address,
-        accounts: &[AccountView],
+        accounts: &mut [AccountView],
         instruction_data: &[u8],
     ) -> ProgramResult {
         crate::process_instruction(program_id, accounts, instruction_data)
@@ -52,16 +52,13 @@ const DISCORD_PUBLIC_KEY: Address = Address::from_str_const(DISCORD_PUBLIC_KEY_S
 const TOKEN_PROGRAM_ID: Address = pinocchio_token::ID;
 const ASSOCIATED_TOKEN_PROGRAM_ID: Address =
     Address::from_str_const("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
-const USDC_MINT: Address = Address::from_str_const("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
-const USDT_MINT: Address = Address::from_str_const("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB");
-const JUP_MINT: Address = Address::from_str_const("JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN");
 
 const SEED_WALLET: &[u8] = b"wallet";
 const SEED_VAULT: &[u8] = b"vault";
 
 pub fn process_instruction(
     program_id: &Address,
-    accounts: &[AccountView],
+    accounts: &mut [AccountView],
     instruction_data: &[u8],
 ) -> ProgramResult {
     match instruction_data.first().copied() {
@@ -104,14 +101,14 @@ enum WithdrawPayload {
 }
 
 struct SolTransferAddressAccounts<'a> {
-    source_wallet_state: &'a AccountView,
+    source_wallet_state: &'a mut AccountView,
     source_vault: &'a AccountView,
     destination: &'a AccountView,
     instructions_sysvar: &'a AccountView,
 }
 
 struct SolTransferUserAccounts<'a> {
-    source_wallet_state: &'a AccountView,
+    source_wallet_state: &'a mut AccountView,
     source_vault: &'a AccountView,
     destination_wallet_state: &'a AccountView,
     destination_vault: &'a AccountView,
@@ -119,7 +116,7 @@ struct SolTransferUserAccounts<'a> {
 }
 
 struct TokenTransferAddressAccounts<'a> {
-    source_wallet_state: &'a AccountView,
+    source_wallet_state: &'a mut AccountView,
     source_vault: &'a AccountView,
     mint: &'a AccountView,
     source_token_account: &'a AccountView,
@@ -128,7 +125,7 @@ struct TokenTransferAddressAccounts<'a> {
 }
 
 struct TokenTransferUserAccounts<'a> {
-    source_wallet_state: &'a AccountView,
+    source_wallet_state: &'a mut AccountView,
     source_vault: &'a AccountView,
     mint: &'a AccountView,
     source_token_account: &'a AccountView,
@@ -139,13 +136,13 @@ struct TokenTransferUserAccounts<'a> {
 
 struct WalletInitAccounts<'a> {
     payer: &'a AccountView,
-    wallet_state: &'a AccountView,
+    wallet_state: &'a mut AccountView,
     vault: &'a AccountView,
     instructions_sysvar: &'a AccountView,
 }
 
 struct SetWithdrawerAccounts<'a> {
-    wallet_state: &'a AccountView,
+    wallet_state: &'a mut AccountView,
     instructions_sysvar: &'a AccountView,
 }
 
@@ -252,7 +249,7 @@ struct ParsedInteraction<'a> {
 
 fn process_execute_instruction(
     program_id: &Address,
-    accounts: &[AccountView],
+    accounts: &mut [AccountView],
     instruction_data: &[u8],
 ) -> ProgramResult {
     let payload = ExecutePayload::try_from(instruction_data)?;
@@ -273,11 +270,11 @@ fn process_execute_instruction(
         (ExecuteAccounts::WalletInit(accounts), Command::WalletInit) => {
             process_wallet_init(program_id, &interaction, accounts)
         }
-        (ExecuteAccounts::SetWithdrawer(accounts), Command::SetWithdrawer { withdrawer }) => {
+        (ExecuteAccounts::SetWithdrawer(mut accounts), Command::SetWithdrawer { withdrawer }) => {
             process_set_withdrawer(
                 program_id,
                 &interaction,
-                &accounts,
+                &mut accounts,
                 verified_timestamp,
                 &withdrawer,
             )
@@ -288,7 +285,7 @@ fn process_execute_instruction(
 
 fn process_system_transfer_instruction(
     program_id: &Address,
-    accounts: &[AccountView],
+    accounts: &mut [AccountView],
     instruction_data: &[u8],
 ) -> ProgramResult {
     let payload = ExecutePayload::try_from(instruction_data)?;
@@ -306,7 +303,7 @@ fn process_system_transfer_instruction(
 
     match (parsed_accounts, command) {
         (
-            SystemTransferAccounts::Address(accounts),
+            SystemTransferAccounts::Address(mut accounts),
             Command::TransferSolAddress {
                 destination_address,
                 amount_ui,
@@ -314,13 +311,13 @@ fn process_system_transfer_instruction(
         ) => process_sol_transfer_address(
             program_id,
             &interaction,
-            &accounts,
+            &mut accounts,
             verified_timestamp,
             &destination_address,
             amount_ui,
         ),
         (
-            SystemTransferAccounts::User(accounts),
+            SystemTransferAccounts::User(mut accounts),
             Command::TransferSolUser {
                 destination_user_id,
                 amount_ui,
@@ -328,7 +325,7 @@ fn process_system_transfer_instruction(
         ) => process_sol_transfer_user(
             program_id,
             &interaction,
-            &accounts,
+            &mut accounts,
             verified_timestamp,
             destination_user_id,
             amount_ui,
@@ -339,7 +336,7 @@ fn process_system_transfer_instruction(
 
 fn process_token_transfer_instruction(
     program_id: &Address,
-    accounts: &[AccountView],
+    accounts: &mut [AccountView],
     instruction_data: &[u8],
 ) -> ProgramResult {
     let payload = ExecutePayload::try_from(instruction_data)?;
@@ -357,7 +354,7 @@ fn process_token_transfer_instruction(
 
     match (parsed_accounts, command) {
         (
-            TokenTransferAccounts::Address(accounts),
+            TokenTransferAccounts::Address(mut accounts),
             Command::TransferTokenAddress {
                 mint,
                 destination_owner,
@@ -366,14 +363,14 @@ fn process_token_transfer_instruction(
         ) => process_token_transfer_address(
             program_id,
             &interaction,
-            &accounts,
+            &mut accounts,
             verified_timestamp,
             &mint,
             &destination_owner,
             amount_ui,
         ),
         (
-            TokenTransferAccounts::User(accounts),
+            TokenTransferAccounts::User(mut accounts),
             Command::TransferTokenUser {
                 mint,
                 destination_user_id,
@@ -382,7 +379,7 @@ fn process_token_transfer_instruction(
         ) => process_token_transfer_user(
             program_id,
             &interaction,
-            &accounts,
+            &mut accounts,
             verified_timestamp,
             &mint,
             destination_user_id,
@@ -394,11 +391,11 @@ fn process_token_transfer_instruction(
 
 fn process_withdraw_instruction(
     program_id: &Address,
-    accounts: &[AccountView],
+    accounts: &mut [AccountView],
     instruction_data: &[u8],
 ) -> ProgramResult {
     let payload = WithdrawPayload::try_from(instruction_data)?;
-    let parsed_accounts = WithdrawAccounts::try_from((program_id, accounts, &payload))?;
+    let parsed_accounts = WithdrawAccounts::try_from((program_id, &*accounts, &payload))?;
 
     match (parsed_accounts, payload.clone()) {
         (WithdrawAccounts::Sol(accounts), WithdrawPayload::Sol { amount }) => {
@@ -485,15 +482,19 @@ impl TryFrom<&[u8]> for WithdrawPayload {
     }
 }
 
-impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a ParsedInteraction<'a>)>
-    for ExecuteAccounts<'a>
+impl<'a>
+    TryFrom<(
+        &'a Address,
+        &'a mut [AccountView],
+        &'a ParsedInteraction<'a>,
+    )> for ExecuteAccounts<'a>
 {
     type Error = ProgramError;
 
     fn try_from(
         (program_id, accounts, interaction): (
             &'a Address,
-            &'a [AccountView],
+            &'a mut [AccountView],
             &'a ParsedInteraction<'a>,
         ),
     ) -> Result<Self, Self::Error> {
@@ -561,15 +562,19 @@ impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a ParsedInteraction<'a>)>
     }
 }
 
-impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a ParsedInteraction<'a>)>
-    for SystemTransferAccounts<'a>
+impl<'a>
+    TryFrom<(
+        &'a Address,
+        &'a mut [AccountView],
+        &'a ParsedInteraction<'a>,
+    )> for SystemTransferAccounts<'a>
 {
     type Error = ProgramError;
 
     fn try_from(
         (program_id, accounts, interaction): (
             &'a Address,
-            &'a [AccountView],
+            &'a mut [AccountView],
             &'a ParsedInteraction<'a>,
         ),
     ) -> Result<Self, Self::Error> {
@@ -641,15 +646,19 @@ impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a ParsedInteraction<'a>)>
     }
 }
 
-impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a ParsedInteraction<'a>)>
-    for TokenTransferAccounts<'a>
+impl<'a>
+    TryFrom<(
+        &'a Address,
+        &'a mut [AccountView],
+        &'a ParsedInteraction<'a>,
+    )> for TokenTransferAccounts<'a>
 {
     type Error = ProgramError;
 
     fn try_from(
         (program_id, accounts, interaction): (
             &'a Address,
-            &'a [AccountView],
+            &'a mut [AccountView],
             &'a ParsedInteraction<'a>,
         ),
     ) -> Result<Self, Self::Error> {
@@ -666,8 +675,6 @@ impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a ParsedInteraction<'a>)>
                     instructions_sysvar,
                     token_program,
                     source_wallet_state,
-                    source_vault,
-                    mint,
                     source_token_account,
                     destination_token_account,
                 )?;
@@ -696,8 +703,6 @@ impl<'a> TryFrom<(&'a Address, &'a [AccountView], &'a ParsedInteraction<'a>)>
                     instructions_sysvar,
                     token_program,
                     source_wallet_state,
-                    source_vault,
-                    mint,
                     source_token_account,
                     destination_token_account,
                 )?;
@@ -823,8 +828,6 @@ fn validate_token_transfer_accounts(
     instructions_sysvar: &AccountView,
     token_program: &AccountView,
     source_wallet_state: &AccountView,
-    _source_vault: &AccountView,
-    _mint: &AccountView,
     source_token_account: &AccountView,
     destination_token_account: &AccountView,
 ) -> ProgramResult {
@@ -848,7 +851,8 @@ fn process_wallet_init(
     interaction: &ParsedInteraction,
     accounts: WalletInitAccounts<'_>,
 ) -> ProgramResult {
-    if !accounts.wallet_state.is_data_empty() || !accounts.wallet_state.owned_by(&pinocchio_system::ID)
+    if !accounts.wallet_state.is_data_empty()
+        || !accounts.wallet_state.owned_by(&pinocchio_system::ID)
     {
         return Err(ProgramError::AccountAlreadyInitialized);
     }
@@ -924,7 +928,7 @@ fn process_wallet_init(
 fn process_set_withdrawer(
     program_id: &Address,
     interaction: &ParsedInteraction,
-    accounts: &SetWithdrawerAccounts<'_>,
+    accounts: &mut SetWithdrawerAccounts<'_>,
     verified_timestamp: i64,
     withdrawer: &Address,
 ) -> ProgramResult {
@@ -947,7 +951,7 @@ fn process_set_withdrawer(
         return Err(invalid_instruction("withdrawer address cannot be zero"));
     }
 
-    wallet_state.withdrawer = withdrawer.clone();
+    wallet_state.withdrawer = *withdrawer;
     wallet_state.last_timestamp = verified_timestamp;
     wallet_state.last_interaction_id = interaction.interaction_id;
     write_wallet_state(accounts.wallet_state, wallet_state)
@@ -956,7 +960,7 @@ fn process_set_withdrawer(
 fn process_sol_transfer_address(
     program_id: &Address,
     interaction: &ParsedInteraction,
-    accounts: &SolTransferAddressAccounts<'_>,
+    accounts: &mut SolTransferAddressAccounts<'_>,
     verified_timestamp: i64,
     destination_address: &Address,
     amount_ui: &str,
@@ -991,7 +995,7 @@ fn process_sol_transfer_address(
 fn process_sol_transfer_user(
     program_id: &Address,
     interaction: &ParsedInteraction,
-    accounts: &SolTransferUserAccounts<'_>,
+    accounts: &mut SolTransferUserAccounts<'_>,
     verified_timestamp: i64,
     destination_user_id: u64,
     amount_ui: &str,
@@ -1005,8 +1009,7 @@ fn process_sol_transfer_user(
     )?;
 
     let (expected_destination_wallet, _) = wallet_pda(destination_user_id, program_id);
-    let (expected_destination_vault, _) =
-        vault_pda(&expected_destination_wallet, program_id);
+    let (expected_destination_vault, _) = vault_pda(&expected_destination_wallet, program_id);
     if accounts.destination_wallet_state.address() != &expected_destination_wallet
         || accounts.destination_vault.address() != &expected_destination_vault
     {
@@ -1032,7 +1035,7 @@ fn process_sol_transfer_user(
 fn process_token_transfer_address(
     program_id: &Address,
     interaction: &ParsedInteraction,
-    accounts: &TokenTransferAddressAccounts<'_>,
+    accounts: &mut TokenTransferAddressAccounts<'_>,
     verified_timestamp: i64,
     mint_address: &Address,
     destination_owner: &Address,
@@ -1075,7 +1078,7 @@ fn process_token_transfer_address(
 fn process_token_transfer_user(
     program_id: &Address,
     interaction: &ParsedInteraction,
-    accounts: &TokenTransferUserAccounts<'_>,
+    accounts: &mut TokenTransferUserAccounts<'_>,
     verified_timestamp: i64,
     mint_address: &Address,
     destination_user_id: u64,
@@ -1272,14 +1275,14 @@ fn invoke_token_transfer(
     ];
     let vault_signer = Signer::from(&vault_signer_seeds);
 
-    TokenTransferChecked {
-        from: source_token_account,
+    TokenTransferChecked::new(
+        source_token_account,
         mint,
-        to: destination_token_account,
-        authority: source_vault,
+        destination_token_account,
+        source_vault,
         amount,
         decimals,
-    }
+    )
     .invoke_signed(&[vault_signer])
 }
 
@@ -1337,14 +1340,14 @@ fn process_withdraw_token(
     ];
     let vault_signer = Signer::from(&vault_signer_seeds);
 
-    TokenTransferChecked {
-        from: accounts.source_token_account,
-        mint: accounts.mint,
-        to: accounts.destination_token_account,
-        authority: accounts.vault,
+    TokenTransferChecked::new(
+        accounts.source_token_account,
+        accounts.mint,
+        accounts.destination_token_account,
+        accounts.vault,
         amount,
         decimals,
-    }
+    )
     .invoke_signed(&[vault_signer])
 }
 
@@ -1423,18 +1426,16 @@ fn read_wallet_state(
                 .map_err(|_| invalid_account_data("wallet_state last_timestamp bytes invalid"))?,
         ),
         last_interaction_id: u64::from_le_bytes(
-            data[19..27]
-                .try_into()
-                .map_err(|_| {
-                    invalid_account_data("wallet_state last_interaction_id bytes invalid")
-                })?,
+            data[19..27].try_into().map_err(|_| {
+                invalid_account_data("wallet_state last_interaction_id bytes invalid")
+            })?,
         ),
         withdrawer: Address::try_from(&data[27..59])
             .map_err(|_| invalid_account_data("wallet_state withdrawer bytes invalid"))?,
     })
 }
 
-fn write_wallet_state(account: &AccountView, state: WalletState) -> ProgramResult {
+fn write_wallet_state(account: &mut AccountView, state: WalletState) -> ProgramResult {
     let mut data = account.try_borrow_mut()?;
     data[0] = WALLET_STATE_TAG;
     data[1] = state.state_bump;
@@ -1618,25 +1619,10 @@ fn parse_token_mint(value: &str) -> Result<Option<Address>, ProgramError> {
     if is_sol_token(value) {
         return Ok(None);
     }
-    if let Some(address) = whitelisted_token_mint(value) {
-        return Ok(Some(address));
-    }
     if let Ok(address) = Address::from_str(value) {
         return Ok(Some(address));
     }
-    Err(invalid_instruction("unsupported token symbol"))
-}
-
-fn whitelisted_token_mint(value: &str) -> Option<Address> {
-    if value.eq_ignore_ascii_case("usdc") {
-        Some(USDC_MINT)
-    } else if value.eq_ignore_ascii_case("usdt") {
-        Some(USDT_MINT)
-    } else if value.eq_ignore_ascii_case("jup") {
-        Some(JUP_MINT)
-    } else {
-        None
-    }
+    Err(invalid_instruction("token must be sol or mint address"))
 }
 
 fn build_transfer_command<'a>(
@@ -1675,6 +1661,20 @@ struct JsonParser<'a> {
     bytes: &'a [u8],
     index: usize,
 }
+
+type ParsedData<'a> = (
+    &'a str,
+    Option<&'a str>,
+    Option<&'a str>,
+    Option<&'a str>,
+    Option<&'a str>,
+);
+type ParsedOptions<'a> = (
+    Option<&'a str>,
+    Option<&'a str>,
+    Option<&'a str>,
+    Option<&'a str>,
+);
 
 impl<'a> JsonParser<'a> {
     fn new(bytes: &'a [u8]) -> Self {
@@ -1829,18 +1829,7 @@ impl<'a> JsonParser<'a> {
         user_id.ok_or_else(|| invalid_instruction("missing user object in member"))
     }
 
-    fn parse_data_object(
-        &mut self,
-    ) -> Result<
-        (
-            &'a str,
-            Option<&'a str>,
-            Option<&'a str>,
-            Option<&'a str>,
-            Option<&'a str>,
-        ),
-        ProgramError,
-    > {
+    fn parse_data_object(&mut self) -> Result<ParsedData<'a>, ProgramError> {
         self.expect_byte(b'{')?;
         let mut name = None;
         let mut wallet = None;
@@ -1882,17 +1871,7 @@ impl<'a> JsonParser<'a> {
         ))
     }
 
-    fn parse_options(
-        &mut self,
-    ) -> Result<
-        (
-            Option<&'a str>,
-            Option<&'a str>,
-            Option<&'a str>,
-            Option<&'a str>,
-        ),
-        ProgramError,
-    > {
+    fn parse_options(&mut self) -> Result<ParsedOptions<'a>, ProgramError> {
         self.expect_byte(b'[')?;
         let mut wallet = None;
         let mut token = None;
@@ -2151,18 +2130,16 @@ fn log_message(message: &str) {
 mod tests {
     use std::str::FromStr;
 
-    use super::{parse_token_mint, Address, JUP_MINT, USDC_MINT, USDT_MINT};
+    use super::{parse_token_mint, Address};
 
     #[test]
-    fn token_symbol_aliases_resolve_to_mainnet_mints() {
-        assert_eq!(parse_token_mint("usdc").unwrap(), Some(USDC_MINT));
-        assert_eq!(parse_token_mint("USDT").unwrap(), Some(USDT_MINT));
-        assert_eq!(parse_token_mint("jUp").unwrap(), Some(JUP_MINT));
-
+    fn token_input_is_sol_or_an_exact_mint_address() {
+        assert_eq!(parse_token_mint("SoL").unwrap(), None);
         let direct_mint = Address::from_str("So11111111111111111111111111111111111111112").unwrap();
         assert_eq!(
             parse_token_mint("So11111111111111111111111111111111111111112").unwrap(),
             Some(direct_mint)
         );
+        assert!(parse_token_mint("USDC").is_err());
     }
 }

@@ -156,8 +156,9 @@ function commandDefinitions() {
         {
           type: 3,
           name: "tkn",
-          description: "Use sol, usdc, usdt, jup, or a token mint address",
+          description: "Type a token symbol and select its mint, or paste a mint address",
           required: true,
+          autocomplete: true,
         },
         {
           type: 10,

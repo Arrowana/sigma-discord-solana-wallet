@@ -9,6 +9,11 @@ import type { DiscordInteraction } from "./discord";
 import { verifyDiscordRequest } from "./discord";
 import type { TransactionExecutor } from "./executor";
 import { buildDiscordCommandTransaction } from "./program";
+import {
+  createTokenRegistry,
+  tokenAutocompleteChoices,
+  type TokenRegistryEntry,
+} from "./token-registry";
 
 export type BotConfig = {
   executor: TransactionExecutor;
@@ -19,6 +24,7 @@ export type BotConfig = {
   walletStateExists?(discordUserId: string): Promise<boolean>;
   walletSummary?(discordUserId: string): Promise<string>;
   airdrop?(discordUserId: string): Promise<string>;
+  tokenRegistry?: readonly TokenRegistryEntry[];
 };
 
 export function createBotHandler(config: BotConfig) {
@@ -46,6 +52,20 @@ export function createBotHandler(config: BotConfig) {
 
     if (interaction.type === 1) {
       return Response.json({ type: 1 });
+    }
+
+    if (interaction.type === 4) {
+      const focusedValue = interaction.data.options?.find((option) => option.focused)?.value;
+      const query = typeof focusedValue === "string" ? focusedValue : "";
+      return Response.json({
+        type: 8,
+        data: {
+          choices: tokenAutocompleteChoices(
+            query,
+            config.tokenRegistry ?? createTokenRegistry(),
+          ),
+        },
+      });
     }
 
     try {
